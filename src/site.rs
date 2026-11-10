@@ -409,6 +409,17 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
             b + "</div>"
         }
         "heartbeat" => format!("{head}{}", made_by_work(data, fam, now_secs())),
+        // the signature view: the whole chain of the lens's subject on one page
+        "essence" => {
+            let subject = Some(k("subject"))
+                .filter(|x| !x.is_empty())
+                .unwrap_or_else(|| g.slug.clone());
+            let ms: Vec<Milestone> = milestones_of(&of(data, "milestones", fam))
+                .into_iter()
+                .filter(|m| m.subject == subject)
+                .collect();
+            essence_html(data, fam, &k("project"), &ms, &g.title, &g.goal)
+        }
         // the idea of the project the lens is about - or of each project of its family that wrote one
         "idea" => {
             let only = k("project");
@@ -764,6 +775,14 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 .idea{max-width:760px}.idea p{font-size:18px;line-height:1.7;margin:0 0 18px}.idea .first p{font-size:23px;line-height:1.5;letter-spacing:-.01em;margin-bottom:26px}
 .idea h2{font-size:26px;margin:44px 0 14px}.idea blockquote{margin:26px 0;padding:4px 0 4px 20px;border-left:3px solid var(--accent)}.idea blockquote p{color:var(--mute);margin-bottom:10px}
 .idea blockquote b{display:block;color:var(--fg);margin-bottom:8px;font-size:18px}.idea .limit{background:var(--soft);border-radius:14px;padding:18px 22px 6px;margin:32px 0}.idea .limit h3{margin-top:0}
+.told{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0 36px}.tell{font-size:13.5px;padding:4px 12px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}.tell.on{border-color:var(--good);color:var(--good)}
+.flow{border-left:3px solid var(--line);margin-left:18px;padding-left:36px}.step{position:relative;margin-bottom:48px}
+.step::before{content:attr(data-n);position:absolute;left:-57px;top:-6px;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--bg);display:flex;align-items:center;justify-content:center;font-weight:700}
+.step>h3{margin:0 0 14px}.opening p{font-size:21px;line-height:1.5;max-width:780px;margin:0}.mute{color:var(--mute)}
+.serve{display:grid;grid-template-columns:minmax(180px,250px) 1fr;gap:18px;padding:16px 0;border-top:1px solid var(--line)}.serve .what b{display:block;margin-bottom:8px}
+.by{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}.working{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.working b{display:block;margin-bottom:6px}.working p{margin:8px 0 0;font-size:14.5px}.working .why{color:var(--mute)}
+@media(max-width:820px){.serve{grid-template-columns:1fr}.flow{margin-left:8px;padding-left:28px}.step::before{left:-49px}}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -1719,7 +1738,7 @@ pub fn subs(data: &Data) -> Vec<Sub> {
 }
 
 const SUB_VIEWS: [(&str, &str); 5] = [
-    ("", "⟦view-how-close⟧"),
+    ("", "⟦view-essence⟧"),
     ("-idea", "⟦view-idea⟧"),
     ("-backlog", "⟦view-backlog⟧"),
     ("-log", "⟦view-log⟧"),
@@ -1744,22 +1763,13 @@ fn sub_nav(p: &Sub, here: &str) -> String {
 pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
     let fam = vec![p.id.clone()];
     let ms = milestones_of(&of(data, "milestones", &fam));
-    let rated = rate(data, &ms);
-    let done = rated.iter().filter(|(_, e)| e.state() == "done").count();
     let back = of(data, "backlog", &fam);
-    let count = |st: &str| back.iter().filter(|r| s(r, "status") == st).count();
-    let mut how = format!(
-        r#"{}<h1>{}</h1><p class="lead">{}</p><div class="stats"><div class="stat"><b>{done} of {}</b><span>⟦milestones-done⟧</span></div><div class="stat"><b>{}</b><span>⟦readiness-of-9⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-in-progress⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-open⟧</span></div></div>"#,
+    // a project lands on its essence: the whole chain on one page
+    let how = format!(
+        "{}{}",
         sub_nav(p, ""),
-        esc(&p.title),
-        esc(&p.goal),
-        rated.len(),
-        readiness(&rated),
-        count("in-progress"),
-        count("open")
+        essence_html(data, &fam, &p.id, &ms, &p.title, &p.goal)
     );
-    how.push_str(&path_section(data, "⟦the-path⟧", &ms));
-    how.push_str(&made_by_work(data, &fam, now_secs()));
     let mut logs = of(data, "session_log", &fam);
     logs.sort_by_key(|r| std::cmp::Reverse(s(r, "entry_date")));
     let mut log = format!(
@@ -2038,6 +2048,129 @@ pub fn idea_html(rows: &[&Row]) -> String {
         }
     }
     b + "</article>"
+}
+
+/// Essence - the signature view: a project's whole chain on one page, each part flowing into the next.
+/// Why it exists (the opening of its own idea) leads to what it must reach (its path); each step
+/// stands with how it is delivered and proven (the workings that serve it - or, plainly, nothing
+/// yet); and beneath it, what is happening now. Four marks say how completely it tells its essence.
+pub fn essence_html(
+    data: &Data,
+    fam: &[String],
+    idea_of: &str,
+    ms: &[Milestone],
+    title: &str,
+    goal: &str,
+) -> String {
+    let rated = rate(data, ms);
+    let done = rated.iter().filter(|(_, e)| e.state() == "done").count();
+    let whose = [idea_of.to_string()];
+    let mut idea_rows = of(data, "idea", &whose);
+    idea_rows.sort_by_key(|r| n(r, "ord"));
+    let workings = of(data, "workings", fam);
+    let served = ms
+        .iter()
+        .filter(|m| workings.iter().any(|w| s(w, "serves") == m.id))
+        .count();
+    let work = made_by_work(data, fam, now_secs());
+    let doing: Vec<&Row> = of(data, "backlog", fam)
+        .into_iter()
+        .filter(|r| s(r, "status") == "in-progress")
+        .collect();
+    let told = [
+        (!idea_rows.is_empty(), "⟦essence-why⟧"),
+        (!ms.is_empty(), "⟦essence-what⟧"),
+        (!ms.is_empty() && served == ms.len(), "⟦essence-how⟧"),
+        (!work.is_empty() || !doing.is_empty(), "⟦essence-now⟧"),
+    ];
+    let mut b = format!(
+        r#"<h1>{}</h1><p class="lead">{}</p><div class="told">"#,
+        esc(title),
+        esc(goal)
+    );
+    for (ok, label) in told {
+        let _ = write!(
+            b,
+            r#"<span class="tell {}">{} {label}</span>"#,
+            if ok { "on" } else { "off" },
+            if ok { "✓" } else { "○" }
+        );
+    }
+    b.push_str(r#"</div><div class="flow">"#);
+    let opening = idea_rows
+        .first()
+        .map(|r| rich(s(r, "text").split("\n\n").next().unwrap_or_default()))
+        .unwrap_or_else(|| r#"<p class="mute">⟦idea-not-written⟧</p>"#.to_string());
+    let _ = write!(
+        b,
+        r#"<section class="step" data-n="1"><h3>⟦essence-why⟧</h3><div class="opening">{opening}</div></section>"#
+    );
+    b.push_str(r#"<section class="step" data-n="2"><h3>⟦essence-what⟧</h3>"#);
+    if rated.is_empty() {
+        b.push_str(r#"<p class="mute">⟦no-path-yet⟧</p>"#);
+    } else {
+        let _ = write!(
+            b,
+            r#"<div class="pathbox">{}</div><p class="work"><b>{done} of {}</b> ⟦milestones-done⟧</p>"#,
+            path_view(&rated),
+            rated.len()
+        );
+    }
+    b.push_str(r#"</section><section class="step" data-n="3"><h3>⟦essence-how⟧</h3>"#);
+    if rated.is_empty() {
+        b.push_str(r#"<p class="mute">⟦no-path-yet⟧</p>"#);
+    }
+    for (m, e) in &rated {
+        let _ = write!(
+            b,
+            r#"<div class="serve"><div class="what"><b>{}</b><span class="chip">⟦state-{}⟧</span></div><div class="by">"#,
+            esc(&m.title),
+            e.state().replace(' ', "-")
+        );
+        let by: Vec<&&Row> = workings.iter().filter(|w| s(w, "serves") == m.id).collect();
+        if by.is_empty() {
+            b.push_str(r#"<p class="mute">⟦nothing-delivers⟧</p>"#);
+        }
+        for w in by {
+            let uses = s(w, "uses");
+            let link = if uses.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    r#"<a class="chip" href="https://github.com/{}">{}</a>"#,
+                    esc(&uses),
+                    esc(uses.rsplit('/').next().unwrap_or(&uses))
+                )
+            };
+            let _ = write!(
+                b,
+                r#"<div class="working"><b>{}</b><span class="chip">{}</span>{link}<p>{}</p><p class="why">{}</p></div>"#,
+                esc(&s(w, "what")),
+                esc(&s(w, "kind")),
+                esc(&s(w, "how")),
+                esc(&s(w, "why"))
+            );
+        }
+        b.push_str("</div></div>");
+    }
+    b.push_str(r#"</section><section class="step" data-n="4"><h3>⟦essence-now⟧</h3>"#);
+    b.push_str(&work);
+    if !doing.is_empty() {
+        b.push_str(r#"<div class="by" style="margin-top:16px">"#);
+        for r in doing.iter().take(6) {
+            let _ = write!(
+                b,
+                r#"<div class="working"><b>{}</b><span class="chip">⟦state-in-progress⟧</span><p>{}</p></div>"#,
+                esc(&s(r, "title")),
+                esc(&cut(&s(r, "note"), 180))
+            );
+        }
+        b.push_str("</div>");
+    }
+    if work.is_empty() && doing.is_empty() {
+        b.push_str(r#"<p class="mute">⟦nothing-yet⟧</p>"#);
+    }
+    b + "</section></div>"
 }
 
 /// A unix time as "YYYY-MM-DD HH:MM UTC" (civil-from-days, no date library).
@@ -2516,12 +2649,12 @@ mod tests {
             ]
         );
         assert!(
-            pages[0].2.contains("<b>1 of 1</b><span>⟦milestones-done⟧"),
+            pages[0].2.contains("<b>1 of 1</b> ⟦milestones-done⟧"),
             "its milestone is done by its backlog"
         );
         assert!(pages[0]
             .2
-            .contains(r#"<a href="project-tad.html" class="on">⟦view-how-close⟧</a>"#));
+            .contains(r#"<a href="project-tad.html" class="on">⟦view-essence⟧</a>"#));
     }
 
     #[test]
@@ -2798,6 +2931,47 @@ mod tests {
         assert!(
             idea_html(&[]).contains("idea-not-written"),
             "a project that has not written its idea says so"
+        );
+    }
+
+    #[test]
+    fn essence_shows_the_whole_chain_and_its_gaps() {
+        let d = data(&[
+            ("idea", "{\"id\":\"1\",\"ord\":1,\"kind\":\"lead\",\"heading\":\"\",\"text\":\"Why it is.\\n\\nMore.\",\"project\":\"o/p\"}"),
+            ("milestones", "{\"id\":\"m1\",\"subject\":\"p\",\"ord\":1,\"title\":\"Written\",\"horizon\":\"working\",\"readiness\":3,\"criteria\":\"backlog:a\",\"why\":\"\",\"project\":\"o/p\"}\n{\"id\":\"m2\",\"subject\":\"p\",\"ord\":2,\"title\":\"Everywhere\",\"horizon\":\"ongoing\",\"readiness\":9,\"criteria\":\"backlog:b\",\"why\":\"\",\"project\":\"o/p\"}"),
+            ("workings", "{\"id\":\"w\",\"what\":\"The guide\",\"kind\":\"practice\",\"serves\":\"m1\",\"how\":\"Says how.\",\"why\":\"So it can be learned.\",\"uses\":\"o/tool\",\"project\":\"o/p\"}"),
+            ("backlog", "{\"id\":\"a\",\"status\":\"done\",\"project\":\"o/p\"}\n{\"id\":\"b\",\"title\":\"Spread it\",\"status\":\"in-progress\",\"note\":\"n\",\"project\":\"o/p\"}"),
+        ]);
+        let fam = vec!["o/p".to_string()];
+        let ms = milestones_of(&of(&d, "milestones", &fam));
+        let e = essence_html(&d, &fam, "o/p", &ms, "P", "a goal");
+        for step in 1..=4 {
+            assert!(
+                e.contains(&format!(r#"data-n="{step}""#)),
+                "step {step} of the chain"
+            );
+        }
+        assert!(
+            e.contains("<p>Why it is.</p>") && !e.contains("More."),
+            "the opening of its own idea, not all of it"
+        );
+        assert!(
+            e.contains("The guide")
+                && e.contains("So it can be learned.")
+                && e.contains("https://github.com/o/tool")
+        );
+        assert_eq!(
+            e.matches("nothing-delivers").count(),
+            1,
+            "the step nothing serves says so"
+        );
+        assert!(
+            e.contains(r#"<span class="tell off">○ ⟦essence-how⟧</span>"#),
+            "not every step is served: the mark is off"
+        );
+        assert!(
+            e.contains(r#"<span class="tell on">✓ ⟦essence-why⟧</span>"#)
+                && e.contains("Spread it")
         );
     }
 }
