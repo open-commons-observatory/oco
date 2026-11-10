@@ -71,3 +71,4 @@ state-done = готово
 state-in-progress = в работе
 state-not-started = не начато
 state-unknown = пока неизвестно
+why = Зачем:

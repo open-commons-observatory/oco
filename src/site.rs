@@ -406,6 +406,55 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
             b + "</div>"
         }
         "heartbeat" => format!("{head}{}", made_by_work(data, fam, now_secs())),
+        "ideas" => {
+            let mut b = format!(r#"{head}<div class="cards" style="margin-top:28px">"#);
+            for r in of(data, "concepts", fam) {
+                let why = s(r, "why");
+                let _ = write!(
+                    b,
+                    r#"<div class="card"><h4>{}</h4><p>{}</p>{}</div>"#,
+                    esc(&s(r, "name")),
+                    esc(&first(r, &["summary", "statement", "description"])),
+                    if why.is_empty() {
+                        String::new()
+                    } else {
+                        format!(r#"<p><b>⟦why⟧</b> {}</p>"#, esc(&why))
+                    }
+                );
+            }
+            for r in of(data, "decisions", fam) {
+                let _ = write!(
+                    b,
+                    r#"<div class="card"><h4>{}</h4><p>{}</p><p><b>⟦rejected⟧</b> {}</p><p><span class="chip">{}</span></p></div>"#,
+                    esc(&s(r, "decision")),
+                    esc(&s(r, "why")),
+                    esc(&s(r, "rejected")),
+                    esc(&s(r, "date"))
+                );
+            }
+            b + "</div>"
+        }
+        "log" => {
+            let mut logs = of(data, "session_log", fam);
+            logs.sort_by_key(|r| std::cmp::Reverse(s(r, "entry_date")));
+            let mut b = head.clone();
+            for r in logs {
+                let rejected = if s(r, "rejected").is_empty() {
+                    String::new()
+                } else {
+                    format!(r#"<p><b>⟦rejected⟧</b> {}</p>"#, esc(&s(r, "rejected")))
+                };
+                let _ = write!(
+                    b,
+                    r#"<div class="log"><time>{} · {}</time><h4>{}</h4><p>{}</p>{rejected}</div>"#,
+                    esc(&s(r, "entry_date")),
+                    esc(&from(r)),
+                    esc(&s(r, "title")),
+                    esc(&s(r, "done"))
+                );
+            }
+            b
+        }
         other => format!(
             r#"{head}<p class="lead">The view kind "{}" is not drawn yet.</p>"#,
             esc(other)
@@ -838,6 +887,9 @@ fn how_close(data: &Data, g: &Grand, fam: &[String]) -> String {
     if !mine.is_empty() {
         b.push_str(&path_section(data, "⟦the-path⟧", &mine));
         b.push_str(&made_by_work(data, fam, now_secs()));
+    }
+    if cols.is_empty() {
+        return b;
     }
     if let Some(l) = cols.iter().find(|c| c.kind == "linux") {
         let [w, p, m, u] = tally(&cells, &ids, &l.id);
@@ -2498,6 +2550,27 @@ mod tests {
         assert!(
             !STYLE.contains("}.s.none{"),
             "a bare .s.none loses to .grid td.s"
+        );
+    }
+
+    #[test]
+    fn a_lens_of_ideas_shows_its_ideas_and_no_empty_comparisons() {
+        let d = data(&[
+            ("lenses", r#"{"id":"m/lens","project":"m/lens","lens":{"lens":{"title":"Mnemonic Vocabulary"},"family":{"owners":["m"]},"view":[{"id":"index","title":"How close","kind":"path"},{"id":"ideas","title":"Ideas","kind":"ideas"}]}}"#),
+            ("projects", "{\"id\":\"m/home\"}"),
+            ("concepts", "{\"id\":\"k\",\"name\":\"The memory kingdom\",\"summary\":\"Reflected.\",\"why\":\"So it is kept.\",\"project\":\"m/home\"}"),
+            ("milestones", "{\"id\":\"w\",\"subject\":\"mnemonic-vocabulary\",\"ord\":1,\"title\":\"Written\",\"horizon\":\"working\",\"readiness\":1,\"criteria\":\"backlog:i\",\"why\":\"\",\"project\":\"m/home\"}"),
+            ("backlog", "{\"id\":\"i\",\"status\":\"done\",\"project\":\"m/home\"}"),
+        ]);
+        let g = grands(&d);
+        let fam = family(&d, &g[0]);
+        let ideas = lens_view(&d, &g[0], &fam, &g[0].lens["view"][1], "");
+        assert!(ideas.contains("The memory kingdom") && ideas.contains("So it is kept."));
+        let how = lens_view(&d, &g[0], &fam, &g[0].lens["view"][0], "");
+        assert!(how.contains("Written"), "its path");
+        assert!(
+            !how.contains("every-candidate"),
+            "no comparison of candidates when there are none"
         );
     }
 }
