@@ -1,6 +1,7 @@
 {"id":"engine-boards","title":"Boards in the picture","status":"open","note":"Each project's live tasks beside its path.","opened":"2026-11-10"}
 {"id":"engine-core-moved","title":"The mark, discovery and the harvest","status":"done","note":"Moved to ocoeco; this repository is only the face.","opened":"2026-11-10"}
 {"id":"engine-criteria-scope","title":"Criteria scoped to their project","status":"done","note":"A criterion is read in the milestone's own project first, then anywhere: two projects with the same backlog id no longer read each other's, and a path may still read another project's work.","opened":"2026-11-10"}
+{"id":"engine-essence","title":"Essence: the signature view","status":"done","note":"One page per project (its landing) and per lens: why, what, how, now - each flowing into the next down one line - with four marks for how completely it tells its essence.","opened":"2026-11-10"}
 {"id":"engine-i18n-data","title":"Data in every language","status":"in-progress","note":"Each project's own translations laid over its source text, and only its own; addresses fixed from the source.","opened":"2026-11-10"}
 {"id":"engine-i18n-interface","title":"The interface in every language","status":"in-progress","note":"Sixty messages marked where written and resolved per page, counts in the right plural form; left: 'N of M' phrases, table headers.","opened":"2026-11-10"}
 {"id":"engine-i18n-structure","title":"One site per language","status":"done","note":"/en/ and /ru/ with identical paths, old addresses redirecting, the switcher, lang and hreflang; Fluent catalogs.","opened":"2026-11-10"}
@@ -13,4 +14,4 @@
 {"id":"engine-project-pages","title":"A page per project","status":"done","note":"How close it is, its backlog, log and ideas; cards on the overview.","opened":"2026-11-10"}
 {"id":"engine-site","title":"The site","status":"done","note":"The observatory and its family, how we work, ranked tables with a sign in every cell; one stylesheet, inline SVG, no JavaScript.","opened":"2026-11-10"}
 {"id":"engine-words-by-the-browser","title":"Words never overlap","status":"done","note":"The path redrawn as page layout: a cell per stop, labels whole and wrapping inside their cell, the ladder likewise; a test forbids words inside SVG.","opened":"2026-11-10"}
-{"id":"engine-workings","title":"How it works, drawn","status":"open","note":"The workings table shown on each project and lens: each milestone with what serves it, how, why we care, and the evidence it produces.","opened":"2026-11-10"}
+{"id":"engine-workings","title":"How it works, drawn","status":"done","note":"A project's workings are drawn in its Essence page: each milestone with what serves it, how, why we care, and the tool - or, plainly, nothing yet.","opened":"2026-11-10"}
