@@ -1,8 +1,10 @@
 //! oco: the Open Commons Observatory's engine.
 //!
 //!   oco discover [--kind KIND] [--json]   every marked project the outlets find, each confirmed by its mark
+//!   oco harvest --out DIR                  their exported tables, tagged and merged, as the observatory's tad data
 
 mod discover;
+mod harvest;
 mod mark;
 
 use anyhow::Result;
@@ -26,10 +28,29 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read every confirmed project's exported tables into DIR: tagged, merged, canonical
+    Harvest {
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
+        Cmd::Harvest { out } => {
+            let gh = discover::GitHub::new();
+            let found = discover::discover(&[(&gh, &gh)], None)?;
+            let mut h = harvest::harvest(&found, &gh);
+            harvest::write(&mut h, &out)?;
+            println!(
+                "{} projects, {} tables ({} rows), {} problems -> {}",
+                h.projects.len(),
+                h.tables.len(),
+                h.tables.values().map(Vec::len).sum::<usize>(),
+                h.problems.len(),
+                out.display()
+            );
+        }
         Cmd::Discover { kind, json } => {
             let gh = discover::GitHub::new();
             let found = discover::discover(&[(&gh, &gh)], kind.as_deref())?;
