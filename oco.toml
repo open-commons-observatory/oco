@@ -4,6 +4,7 @@ schema = 1
 [project]
 id = "open-commons-observatory/oco"
 name = "The observatory's engine: the mark, discovery, the harvest, the site"
+title = "Engine"
 kind = "tool"
 parent = "open-commons-observatory"
 
