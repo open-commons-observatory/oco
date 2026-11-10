@@ -1029,11 +1029,12 @@ pub fn path_svg(ms: &[(Milestone, Evidence)]) -> String {
         }
         x0 += bw;
     }
-    let reached = stops
+    // the road is travelled only as far as every stop before it is done
+    let run = stops
         .iter()
-        .rposition(|(_, _, e)| e.state() == "done")
-        .map(|i| stops[i].0)
-        .unwrap_or(20.0);
+        .take_while(|(_, _, e)| e.state() == "done")
+        .count();
+    let reached = if run == 0 { 20.0 } else { stops[run - 1].0 };
     let _ = write!(
         svg,
         r#"<line x1="20" y1="{line_y}" x2="{:.1}" y2="{line_y}" class="road"/><line x1="20" y1="{line_y}" x2="{reached:.1}" y2="{line_y}" class="travelled"/>"#,
@@ -1066,12 +1067,8 @@ pub fn path_svg(ms: &[(Milestone, Evidence)]) -> String {
             esc(&cut(&m.title, 22))
         );
     }
-    let level = ms
-        .iter()
-        .filter(|(_, e)| e.state() == "done")
-        .map(|(m, _)| m.readiness)
-        .max()
-        .unwrap_or(0);
+    // readiness is earned in order: the highest level in the unbroken run of done milestones
+    let level = readiness(ms);
     let _ = write!(
         svg,
         r#"<text x="20" y="196" class="hlabel">Readiness</text>"#
@@ -1090,6 +1087,20 @@ pub fn path_svg(ms: &[(Milestone, Evidence)]) -> String {
         112 + 9 * 30 + 6
     );
     svg + "</svg>"
+}
+
+/// The readiness a path has earned: the highest level among its milestones done in an unbroken run
+/// from the start - a later milestone done early does not lift it.
+pub fn readiness(ms: &[(Milestone, Evidence)]) -> i64 {
+    let mut ordered: Vec<&(Milestone, Evidence)> = ms.iter().collect();
+    let place = |h: &str| HORIZONS.iter().position(|(k, _)| *k == h).unwrap_or(3);
+    ordered.sort_by_key(|(m, _)| (place(&m.horizon), m.ord));
+    ordered
+        .iter()
+        .take_while(|(_, e)| e.state() == "done")
+        .map(|(m, _)| m.readiness)
+        .max()
+        .unwrap_or(0)
 }
 
 /// A subject's path and the evidence of each of its milestones.
@@ -1527,6 +1538,45 @@ mod tests {
         assert!(
             svg.contains("level 6 of 9"),
             "the highest readiness of a done milestone"
+        );
+    }
+
+    #[test]
+    fn readiness_is_earned_in_order() {
+        let m = |id: &str, h: &str, r: i64| Milestone {
+            id: id.into(),
+            subject: "x".into(),
+            ord: 1,
+            title: id.into(),
+            horizon: h.into(),
+            readiness: r,
+            criteria: vec![],
+            why: String::new(),
+        };
+        let done = Evidence {
+            good: 1,
+            part: 0,
+            bad: 0,
+            unknown: 0,
+        };
+        let open = Evidence {
+            good: 0,
+            part: 1,
+            bad: 0,
+            unknown: 0,
+        };
+        assert_eq!(
+            readiness(&[
+                (m("a", "working", 5), done),
+                (m("b", "working", 6), open),
+                (m("c", "ongoing", 8), done)
+            ]),
+            5,
+            "c done early does not lift it"
+        );
+        assert_eq!(
+            readiness(&[(m("a", "working", 5), open), (m("c", "ongoing", 8), done)]),
+            0
         );
     }
 }
