@@ -6,6 +6,8 @@ description = "The Open Commons Observatory's face: its website, rendered from t
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+fluent-bundle = "0.15"
+unic-langid = "0.9"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
