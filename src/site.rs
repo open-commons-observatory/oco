@@ -645,7 +645,7 @@ table.grid{border-collapse:collapse;width:100%;font-size:14.5px}
 .grid tr.group th{background:var(--soft);color:var(--mute);font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:7px 12px}
 .grid td.s{text-align:center;font-weight:700;width:1%;white-space:nowrap;color:#fff}
 .s.good{background:color-mix(in srgb,var(--good) 85%,transparent)}.s.part{background:color-mix(in srgb,var(--part) 85%,transparent)}
-.s.bad{background:color-mix(in srgb,var(--bad) 85%,transparent)}.s.none{background:var(--soft);color:var(--mute)}.s.na{background:var(--na);color:var(--mute)}
+.s.bad{background:color-mix(in srgb,var(--bad) 85%,transparent)}.grid td.s.none{background:var(--soft);color:var(--mute)}.grid td.s.na{background:var(--na);color:var(--mute)}
 .legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--mute);font-size:14px;margin:18px 0 0}.legend i{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:5px;margin-right:6px;font-style:normal;font-weight:700;color:#fff;font-size:12px}
 .legend .none,.legend .na{color:var(--mute)}.legend .good{background:var(--good)}.legend .part{background:var(--part)}.legend .bad{background:var(--bad)}.legend .none{background:var(--soft)}.legend .na{background:var(--na)}
 .bars{margin-top:24px}.bar{display:grid;grid-template-columns:220px 1fr 56px;gap:14px;align-items:center;margin:10px 0}
@@ -2487,6 +2487,17 @@ mod tests {
         assert!(
             v.find("звонки").unwrap() < v.find("power").unwrap(),
             "the lens's order holds, though the category is shown translated"
+        );
+    }
+
+    #[test]
+    fn pale_cells_keep_dark_signs() {
+        // the table's "cell text is white" rule (.grid td.s) is more specific than a bare .s.none:
+        // the pale cells' rule must be at least as specific, or their signs turn white on pale
+        assert!(STYLE.contains(".grid td.s.none{") && STYLE.contains(".grid td.s.na{"));
+        assert!(
+            !STYLE.contains("}.s.none{"),
+            "a bare .s.none loses to .grid td.s"
         );
     }
 }
