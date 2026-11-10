@@ -435,13 +435,17 @@ impl Page<'_> {
     /// A page: the observatory's tabs (itself, then each grand project), a grand project's own views.
     fn render(&self, grand: Option<&Grand>, view: &str, title: &str, body: &str) -> String {
         let up = if grand.is_some() { "../" } else { "" };
-        let mut nav = format!(
-            r#"<a href="{up}index.html"{}>Observatory</a>"#,
-            if grand.is_none() {
+        let here = |v: &str| {
+            if grand.is_none() && view == v {
                 r#" class="on""#
             } else {
                 ""
             }
+        };
+        let mut nav = format!(
+            r#"<a href="{up}index.html"{}>Observatory</a><a href="{up}how-we-work.html"{}>How we work</a>"#,
+            here(""),
+            here("how-we-work.html")
         );
         for g in self.grands {
             let on = grand.is_some_and(|x| x.id == g.id);
@@ -1176,6 +1180,106 @@ fn path_section(data: &Data, title: &str, ms: &[Milestone]) -> String {
     b + "</div>"
 }
 
+fn first(r: &Row, keys: &[&str]) -> String {
+    keys.iter()
+        .map(|k| s(r, k))
+        .find(|x| !x.is_empty())
+        .unwrap_or_default()
+}
+
+fn from(r: &Row) -> String {
+    let p = s(r, "project");
+    p.rsplit('/').next().unwrap_or(&p).to_string()
+}
+
+/// How the commons works: the canon's principles and architectures, every practice and concept -
+/// each card naming the project it comes from.
+fn how_we_work(data: &Data) -> String {
+    let mut b = String::from(
+        r#"<h1>How we work</h1><p class="lead">The principles, architectures, practices and concepts the commons works by - kept as data in the canon and the observatory, read by people and agents alike.</p>"#,
+    );
+    let principles = data.rows("principles");
+    if !principles.is_empty() {
+        b.push_str("<h2>Principles</h2>");
+        let mut cats: Vec<String> = Vec::new();
+        for r in principles {
+            if !cats.contains(&s(r, "category")) {
+                cats.push(s(r, "category"));
+            }
+        }
+        for c in cats {
+            let _ = write!(b, r#"<h3>{}</h3><div class="cards">"#, esc(&c));
+            for r in principles.iter().filter(|r| s(r, "category") == c) {
+                let origin = [s(r, "origin_author"), s(r, "origin_year")]
+                    .into_iter()
+                    .filter(|x| !x.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let _ = write!(
+                    b,
+                    r#"<div class="card"><h4>{}</h4><p>{}</p>{}<p>{}<span class="chip">{}</span></p></div>"#,
+                    esc(&s(r, "name")),
+                    esc(&s(r, "statement")),
+                    if s(r, "caveat").is_empty() {
+                        String::new()
+                    } else {
+                        format!(r#"<p><b>But:</b> {}</p>"#, esc(&s(r, "caveat")))
+                    },
+                    if origin.is_empty() {
+                        String::new()
+                    } else {
+                        format!(r#"<span class="chip">{}</span>"#, esc(&origin))
+                    },
+                    esc(&from(r))
+                );
+            }
+            b.push_str("</div>");
+        }
+    }
+    let arch = data.rows("architectures");
+    if !arch.is_empty() {
+        b.push_str(r#"<h2>Architectures</h2><div class="cards">"#);
+        for r in arch {
+            let _ = write!(
+                b,
+                r#"<div class="card"><h4>{}</h4><p>{}</p><p><b>Best when:</b> {}</p><p><span class="chip">{}</span></p></div>"#,
+                esc(&s(r, "name")),
+                esc(&s(r, "essence")),
+                esc(&s(r, "best_when")),
+                esc(&from(r))
+            );
+        }
+        b.push_str("</div>");
+    }
+    for (table, title) in [("practices", "Practices"), ("concepts", "Concepts")] {
+        let rows = data.rows(table);
+        if rows.is_empty() {
+            continue;
+        }
+        let _ = write!(b, r#"<h2>{title}</h2><div class="cards">"#);
+        for r in rows {
+            let who = s(r, "for");
+            let _ = write!(
+                b,
+                r#"<div class="card"><h4>{}</h4><p>{}</p><p>{}<span class="chip">{}</span></p></div>"#,
+                esc(&cut(&first(r, &["name", "practice"]), 160)),
+                esc(&first(
+                    r,
+                    &["summary", "description", "definition", "why", "statement"]
+                )),
+                if who.is_empty() {
+                    String::new()
+                } else {
+                    format!(r#"<span class="chip">for {}</span>"#, esc(&who))
+                },
+                esc(&from(r))
+            );
+        }
+        b.push_str("</div>");
+    }
+    b
+}
+
 /// A unix time as "YYYY-MM-DD HH:MM UTC" (civil-from-days, no date library).
 pub fn utc(secs: i64) -> String {
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
@@ -1211,6 +1315,10 @@ pub fn render(data: &Data, out: &Path) -> Result<()> {
     std::fs::write(
         out.join("index.html"),
         page.render(None, "", "Observatory", &observatory(data, &grands)),
+    )?;
+    std::fs::write(
+        out.join("how-we-work.html"),
+        page.render(None, "how-we-work.html", "How we work", &how_we_work(data)),
     )?;
     let status_legend = legend(&[
         ("good", "works"),
