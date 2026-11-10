@@ -5,7 +5,7 @@
 {"id":"engine-i18n-interface","title":"The interface in every language","status":"in-progress","note":"Sixty messages marked where written and resolved per page, counts in the right plural form; left: 'N of M' phrases, table headers.","opened":"2026-11-10"}
 {"id":"engine-i18n-structure","title":"One site per language","status":"done","note":"/en/ and /ru/ with identical paths, old addresses redirecting, the switcher, lang and hreflang; Fluent catalogs.","opened":"2026-11-10"}
 {"id":"engine-lens-index","title":"An index of discovered lenses","status":"open","note":"Curated lenses take the navigation; every other lens found is to be listed.","opened":"2026-11-10"}
-{"id":"engine-lens-ours","title":"Every view a lens","status":"open","note":"How we work and the observatory's own family, built as lenses too; view kinds log and ideas drawn.","opened":"2026-11-10"}
+{"id":"engine-lens-ours","title":"Every view a lens","status":"open","note":"How we work and the observatory's own family, built as lenses too. The view kinds ideas and log are drawn.","opened":"2026-11-10"}
 {"id":"engine-lenses","title":"Grand views from lenses","status":"done","note":"Every grand view drawn from its lens.toml with the shared vocabulary: path, matrix, families, runs, backlog, cards, heartbeat.","opened":"2026-11-10"}
 {"id":"engine-made-by-work","title":"Made by work","status":"done","note":"Each project's 90-day heartbeat, latest release and CI, from ocoeco's gatherers.","opened":"2026-11-10"}
 {"id":"engine-path","title":"The path","status":"done","note":"Three horizons, milestones filled by evidence, readiness earned in order.","opened":"2026-11-10"}
