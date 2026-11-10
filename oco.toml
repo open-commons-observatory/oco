@@ -12,3 +12,6 @@ parent = "open-commons-observatory"
 [exports]
 backlog = "oco-data/backlog.json"
 milestones = "oco-data/milestones.json"
+activity = "oco/gathered/activity.json"
+releases = "oco/gathered/releases.json"
+ci = "oco/gathered/ci.json"
