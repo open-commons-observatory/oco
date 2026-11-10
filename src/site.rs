@@ -32,6 +32,33 @@ fn n(r: &Row, k: &str) -> i64 {
         .unwrap_or(0)
 }
 
+/// Sets the text at a dotted path in a row: object keys by name, list items by their `id`.
+fn set_path(row: &mut Row, path: &str, text: &str) {
+    let parts: Vec<&str> = path.split('.').collect();
+    let Some((last, way)) = parts.split_last() else {
+        return;
+    };
+    if way.is_empty() {
+        row.insert(last.to_string(), Value::String(text.to_string()));
+        return;
+    }
+    let Some(mut cur) = row.get_mut(way[0]) else {
+        return;
+    };
+    for p in &way[1..] {
+        let next = match cur {
+            Value::Object(m) => m.get_mut(*p),
+            Value::Array(a) => a.iter_mut().find(|x| x["id"].as_str() == Some(*p)),
+            _ => None,
+        };
+        let Some(n) = next else { return };
+        cur = n;
+    }
+    if let Value::Object(m) = cur {
+        m.insert(last.to_string(), Value::String(text.to_string()));
+    }
+}
+
 /// Text made safe for HTML.
 pub fn esc(x: &str) -> String {
     x.replace('&', "&amp;")
@@ -111,6 +138,60 @@ impl Data {
         Ok(Data { tables })
     }
 
+    /// The data as one language reads it: each project's own translations laid over its source
+    /// text (ocoeco SPEC section 9). A translation applies only to rows of the project that wrote
+    /// it - a project translates its own data, a lens only its own text - and what is not
+    /// translated stays as written. Addresses stay the same in every language: they are fixed
+    /// from the source text first.
+    pub fn localized(&self, lang: &str) -> Data {
+        let mut tables = self.tables.clone();
+        if let Some(rows) = tables.get_mut("lenses") {
+            for r in rows.iter_mut() {
+                let title = r
+                    .get("lens")
+                    .and_then(|l| l["lens"]["title"].as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if !title.is_empty() {
+                    r.insert("slug".into(), Value::String(slug(&title)));
+                }
+            }
+        }
+        if let Some(rows) = tables.get_mut("projects") {
+            for r in rows.iter_mut() {
+                let name = s(r, "name");
+                let title = Some(s(r, "title"))
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or_else(|| name.split(':').next().unwrap_or(&name).trim().to_string());
+                r.insert("slug".into(), Value::String(slug(&title)));
+            }
+        }
+        for t in self
+            .rows("translations")
+            .iter()
+            .filter(|t| s(t, "lang") == lang)
+        {
+            let (table, row, project, text) =
+                (s(t, "table"), s(t, "row"), s(t, "project"), s(t, "text"));
+            // in the lenses table the column is the path in lens.toml (lens.title, view.features.title)
+            let column = if table == "lenses" {
+                format!("lens.{}", s(t, "column"))
+            } else {
+                s(t, "column")
+            };
+            let Some(rows) = tables.get_mut(&table) else {
+                continue;
+            };
+            for r in rows
+                .iter_mut()
+                .filter(|r| s(r, "id") == row && s(r, "project") == project)
+            {
+                set_path(r, &column, &text);
+            }
+        }
+        Data { tables }
+    }
+
     pub fn rows(&self, t: &str) -> &[Row] {
         self.tables.get(t).map(Vec::as_slice).unwrap_or(&[])
     }
@@ -170,7 +251,9 @@ pub fn grands(data: &Data) -> Vec<Grand> {
                 })
                 .collect();
             Grand {
-                slug: slug(&title),
+                slug: Some(s(r, "slug"))
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or_else(|| slug(&title)),
                 owner: id.split('/').next().unwrap_or_default().to_string(),
                 goal: l["lens"]["goal"].as_str().unwrap_or("").to_string(),
                 owners: strs(&l["family"]["owners"]),
@@ -1275,9 +1358,10 @@ pub fn path_svg(ms: &[(Milestone, Evidence)]) -> String {
             if l <= level { "lvl on" } else { "lvl" }
         );
     }
+    let level_text = esc(&crate::i18n::tn("level-of-9", level));
     let _ = write!(
         svg,
-        r#"<text x="{}" y="196" class="hlabel">level {level} of 9</text>"#,
+        r#"<text x="{}" y="196" class="hlabel">{level_text}</text>"#,
         112 + 9 * 30 + 6
     );
     svg + "</svg>"
@@ -1490,7 +1574,12 @@ pub fn subs(data: &Data) -> Vec<Sub> {
                 .filter(|t| !t.is_empty())
                 .unwrap_or(before);
             Sub {
-                slug: format!("project-{}", slug(&title)),
+                slug: format!(
+                    "project-{}",
+                    Some(s(p, "slug"))
+                        .filter(|x| !x.is_empty())
+                        .unwrap_or_else(|| slug(&title))
+                ),
                 id: s(p, "id"),
                 goal: after,
                 title,
@@ -1772,7 +1861,7 @@ pub fn render(data: &Data, out: &Path) -> Result<()> {
     // the same site once per language, under its own folder, paths identical
     for l in LANGUAGES.iter() {
         crate::i18n::set(l.code);
-        render_in(data, &out.join(l.code))?;
+        render_in(&data.localized(l.code), &out.join(l.code))?;
     }
     crate::i18n::set(DEFAULT);
     // the old addresses keep working: each page at the root leads to its default-language twin
@@ -2292,6 +2381,41 @@ mod tests {
             localize("<b>⟦rejected⟧</b> plain ⟦"),
             "<b>Rejected:</b> plain ⟦",
             "an unclosed mark stays as written"
+        );
+    }
+
+    #[test]
+    fn a_project_translates_its_own_data_and_only_its_own() {
+        let d = data(&[
+            ("lenses", r#"{"id":"o/lens","project":"o/lens","lens":{"lens":{"title":"Linux Phones"},"view":[{"id":"features","title":"Features"}]}}"#),
+            ("backlog", "{\"id\":\"b\",\"title\":\"Sound\",\"project\":\"o/docs\"}\n{\"id\":\"c\",\"title\":\"Mic\",\"project\":\"o/docs\"}"),
+            (
+                "translations",
+                "{\"table\":\"lenses\",\"row\":\"o/lens\",\"column\":\"lens.title\",\"lang\":\"ru\",\"text\":\"Linux-телефоны\",\"project\":\"o/lens\"}\n{\"table\":\"lenses\",\"row\":\"o/lens\",\"column\":\"view.features.title\",\"lang\":\"ru\",\"text\":\"Функции\",\"project\":\"o/lens\"}\n{\"table\":\"backlog\",\"row\":\"b\",\"column\":\"title\",\"lang\":\"ru\",\"text\":\"Звук\",\"project\":\"o/docs\"}\n{\"table\":\"backlog\",\"row\":\"c\",\"column\":\"title\",\"lang\":\"ru\",\"text\":\"Чужой перевод\",\"project\":\"o/lens\"}",
+            ),
+        ]);
+        let ru = d.localized("ru");
+        let g = grands(&ru);
+        assert_eq!(g[0].title, "Linux-телефоны");
+        assert_eq!(
+            g[0].slug, "linux-phones",
+            "the address is the same in every language"
+        );
+        assert_eq!(g[0].views[0].1, "Функции");
+        assert_eq!(
+            s(&ru.rows("backlog")[0], "title"),
+            "Звук",
+            "its own project's translation"
+        );
+        assert_eq!(
+            s(&ru.rows("backlog")[1], "title"),
+            "Mic",
+            "another project may not translate it"
+        );
+        assert_eq!(
+            grands(&d.localized("en"))[0].title,
+            "Linux Phones",
+            "untranslated: as written"
         );
     }
 }

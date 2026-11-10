@@ -65,3 +65,4 @@ skipped = пропущено
 readiness = Готовность
 the-path = Путь
 the-path-of = Путь:
+level-of-9 = уровень { $count } из 9
