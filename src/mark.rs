@@ -30,6 +30,9 @@ pub struct Project {
     /// A short title for navigation (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Its place among its siblings in the picture (optional: lower first, then by name)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<i64>,
     pub kind: String,
     pub parent: String,
 }

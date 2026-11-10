@@ -6,6 +6,7 @@ id = "open-commons-observatory/oco"
 name = "The observatory's engine: the mark, discovery, the harvest, the site"
 title = "Engine"
 kind = "tool"
+order = 3
 parent = "open-commons-observatory"
 
 [exports]
