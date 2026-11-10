@@ -3,6 +3,7 @@
 //! project (a marked project of kind `picture`) has its own tab and its own views: how close it is,
 //! its tables, its tests, backlog and landscape. Columns are ranked from the data, best first.
 
+use crate::i18n::{current, t, DEFAULT, LANGUAGES};
 use anyhow::{Context, Result};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -557,6 +558,8 @@ svg.path .lvl{fill:var(--soft);stroke:var(--line)}svg.path .lvl.on{fill:var(--ac
 svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.spark .idle{fill:var(--line)}
 .work{margin:6px 8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}.work b{font-size:22px}
 .chip.ci.good{color:var(--good);border-color:var(--good)}.chip.ci.bad{color:var(--bad);border-color:var(--bad)}.chip.ci.part{color:var(--part);border-color:var(--part)}
+.langs{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:14px;white-space:nowrap;color:var(--mute)}
+.langs a{color:var(--mute)}.langs b{color:var(--fg);font-weight:600}.langs .dot{opacity:.6}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -577,9 +580,11 @@ impl Page<'_> {
             }
         };
         let mut nav = format!(
-            r#"<a href="{up}index.html"{}>Observatory</a><a href="{up}how-we-work.html"{}>How we work</a>"#,
+            r#"<a href="{up}index.html"{}>{}</a><a href="{up}how-we-work.html"{}>{}</a>"#,
             here(""),
-            here("how-we-work.html")
+            esc(&t("nav-observatory")),
+            here("how-we-work.html"),
+            esc(&t("nav-how-we-work"))
         );
         for g in self.grands.iter().filter(|g| g.curated) {
             let on = grand.is_some_and(|x| x.id == g.id);
@@ -597,26 +602,57 @@ impl Page<'_> {
                     r#"<div class="sub"><div class="wrap"><b>{}</b>"#,
                     esc(&g.title)
                 );
-                for (f, t) in g.views.iter().map(|(a, b)| (a.as_str(), b.as_str())) {
+                for (f, label) in &g.views {
                     let _ = write!(
                         x,
-                        r#"<a href="{f}"{}>{t}</a>"#,
-                        if f == view { r#" class="on""# } else { "" }
+                        r#"<a href="{f}"{}>{}</a>"#,
+                        if f == view { r#" class="on""# } else { "" },
+                        esc(label)
                     );
                 }
                 x + "</div></div>"
             })
             .unwrap_or_default();
+        // the same page in every language: its path below the language's folder
+        let path = match grand {
+            Some(g) => format!("{}/{}", g.slug, view),
+            None if view.is_empty() => "index.html".to_string(),
+            None => view.to_string(),
+        };
+        let lang = current();
+        let (mut langs, mut alternates) = (String::new(), String::new());
+        for l in LANGUAGES.iter() {
+            let href = format!("{up}../{}/{path}", l.code);
+            let _ = write!(
+                alternates,
+                r#"<link rel="alternate" hreflang="{}" href="{href}">"#,
+                l.code
+            );
+            if !langs.is_empty() {
+                langs.push_str(r#"<span class="dot">·</span>"#);
+            }
+            if l.code == lang {
+                let _ = write!(langs, r#"<b lang="{0}">{1}</b>"#, l.code, l.name);
+            } else {
+                let _ = write!(
+                    langs,
+                    r#"<a href="{href}" hreflang="{0}" lang="{0}">{1}</a>"#,
+                    l.code, l.name
+                );
+            }
+        }
         format!(
-            r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{t} · Open Commons Observatory</title><link rel="stylesheet" href="{up}style.css"></head><body>
-<header><div class="wrap"><a class="mark" href="{up}index.html">Open Commons Observatory</a><nav>{nav}</nav></div></header>{sub}
+            r#"<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{t} · Open Commons Observatory</title><link rel="stylesheet" href="{up}style.css">{alternates}</head><body>
+<header><div class="wrap"><a class="mark" href="{up}index.html">Open Commons Observatory</a><nav>{nav}</nav><span class="langs" aria-label="{langs_label}">{langs}</span></div></header>{sub}
 <main><div class="wrap">{body}</div></main>
-<footer><div class="wrap">Every word and number here comes from the projects' own data, gathered by the observatory · {g}</div></footer>
+<footer><div class="wrap">{footer} · {g}</div></footer>
 </body></html>
 "#,
             t = esc(title),
-            g = esc(self.generated)
+            g = esc(self.generated),
+            langs_label = esc(&t("languages")),
+            footer = esc(&t("footer"))
         )
     }
 }
@@ -1680,8 +1716,9 @@ pub fn made_by_work(data: &Data, fam: &[String], now: i64) -> String {
             esc(&label)
         );
     }
+    let work_line = esc(&crate::i18n::tn("commits-90", total));
     format!(
-        r#"<h2>Made by work</h2><div class="pathbox"><p class="work"><b>{total}</b> commits in the last 90 days {release}</p><p class="work">{cis}</p>{svg}</div>"#
+        r#"<h2>Made by work</h2><div class="pathbox"><p class="work"><b>{work_line}</b> {release}</p><p class="work">{cis}</p>{svg}</div>"#
     )
 }
 
@@ -1706,12 +1743,59 @@ pub fn utc(secs: i64) -> String {
 
 /// Renders the observatory and every grand project into `out`.
 pub fn render(data: &Data, out: &Path) -> Result<()> {
+    // the same site once per language, under its own folder, paths identical
+    for l in LANGUAGES.iter() {
+        crate::i18n::set(l.code);
+        render_in(data, &out.join(l.code))?;
+    }
+    crate::i18n::set(DEFAULT);
+    // the old addresses keep working: each page at the root leads to its default-language twin
+    stubs(&out.join(DEFAULT), out, "")?;
+    std::fs::write(out.join(".nojekyll"), "")?;
+    Ok(())
+}
+
+/// Writes, for every page under `dir`, a redirect at the same path under `out` to the default language.
+fn stubs(dir: &Path, out: &Path, rel: &str) -> Result<()> {
+    for e in std::fs::read_dir(dir)? {
+        let p = e?.path();
+        let name = p
+            .file_name()
+            .and_then(|x| x.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let r = if rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{rel}/{name}")
+        };
+        if p.is_dir() {
+            stubs(&p, out, &r)?;
+        } else if name.ends_with(".html") {
+            let to = format!("{}{DEFAULT}/{r}", "../".repeat(r.matches('/').count()));
+            if let Some(parent) = out.join(&r).parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(out.join(&r), redirect(&to))?;
+        }
+    }
+    Ok(())
+}
+
+pub fn redirect(to: &str) -> String {
+    format!(
+        r#"<!doctype html><html lang="{DEFAULT}"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0; url={to}"><link rel="canonical" href="{to}"><title>Open Commons Observatory</title></head><body><a href="{to}">{to}</a></body></html>
+"#
+    )
+}
+
+fn render_in(data: &Data, out: &Path) -> Result<()> {
     std::fs::create_dir_all(out)?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let generated = format!("updated {}", utc(now));
+    let generated = format!("{} {}", t("updated"), utc(now));
     let grands = grands(data);
     let page = Page {
         grands: &grands,
@@ -2129,7 +2213,7 @@ mod tests {
         ]);
         let w = made_by_work(&d, &["o/p".to_string()], now);
         assert!(
-            w.contains("<b>7</b> commits in the last 90 days"),
+            w.contains("<b>7 commits in the last 90 days</b>"),
             "only the last 90 days count"
         );
         assert!(w.contains("latest release v1 · 2026-11-01"));
@@ -2139,5 +2223,34 @@ mod tests {
             made_by_work(&d, &["o/none".to_string()], now).is_empty(),
             "nothing gathered, nothing shown"
         );
+    }
+
+    #[test]
+    fn every_page_offers_its_twin_in_every_language() {
+        crate::i18n::set("ru");
+        let grands: Vec<Grand> = vec![];
+        let p = Page {
+            grands: &grands,
+            generated: "x",
+        };
+        let html = p.render(None, "how-we-work.html", "T", "B");
+        assert!(html.contains(r#"<html lang="ru">"#));
+        assert!(
+            html.contains(r#"<b lang="ru">Русский</b>"#),
+            "the current language, in itself"
+        );
+        assert!(
+            html.contains(
+                r#"<a href="../en/how-we-work.html" hreflang="en" lang="en">English</a>"#
+            ),
+            "the same page in English"
+        );
+        assert!(
+            html.contains(r#"<link rel="alternate" hreflang="en" href="../en/how-we-work.html">"#)
+        );
+        assert!(html.contains(">Как мы работаем</a>"));
+        crate::i18n::set("en");
+        assert!(redirect("../en/linux-phones/index.html")
+            .contains(r#"url=../en/linux-phones/index.html"#));
     }
 }

@@ -2,6 +2,7 @@
 //!
 //!   oco site --data DIR --out DIR
 
+mod i18n;
 mod site;
 
 use anyhow::Result;
