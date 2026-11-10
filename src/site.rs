@@ -418,7 +418,14 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
                 .into_iter()
                 .filter(|m| m.subject == subject)
                 .collect();
-            essence_html(data, fam, &k("project"), &ms, &g.title, &g.goal)
+            // the lens's own name on its landing; another essence inside it carries its view's name
+            let own = v.get("id").is_some_and(|i| i == "index");
+            let (title, goal) = if own {
+                (g.title.clone(), g.goal.clone())
+            } else {
+                (k("title"), k("lead"))
+            };
+            essence_html(data, fam, &k("project"), &ms, &title, &goal)
         }
         // the idea of the project the lens is about - or of each project of its family that wrote one
         "idea" => {
