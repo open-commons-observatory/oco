@@ -91,6 +91,8 @@ pub fn tone(status: &str) -> &'static str {
         "partial" | "in-progress" => "part",
         "broken" | "missing" | "fail" | "no" => "bad",
         "not-applicable" | "n/a" => "na",
+        // planned work not yet started is not failure: its own calm tone
+        "open" | "planned" => "todo",
         _ => "none",
     }
 }
@@ -101,6 +103,7 @@ fn sign(t: &str) -> &'static str {
         "part" => "◐",
         "bad" => "✕",
         "na" => "–",
+        "todo" => "○",
         _ => "?",
     }
 }
@@ -723,6 +726,7 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 .stitle{margin-top:7px;max-width:100%;text-align:center;font-size:12.5px;line-height:1.25;overflow-wrap:anywhere;hyphens:auto}
 .ladder{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 8px 2px}.steps{display:inline-flex;gap:4px}
 .lvl{display:inline-block;width:26px;height:10px;border-radius:3px;background:var(--soft);border:1px solid var(--line)}.lvl.on{background:var(--accent);border-color:var(--accent)}
+.path .ring.todo{stroke:var(--none)}.mini.todo{background:transparent;border:1px solid var(--none);color:var(--mute);line-height:16px}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -1295,7 +1299,7 @@ pub fn evaluate(data: &Data, criterion: &str) -> Vec<(String, String)> {
         {
             Some(x) if x == "done" => "works",
             Some(x) if x == "in-progress" => "partial",
-            Some(_) => "missing",
+            Some(_) => "open",
             None => "unknown",
         };
         return vec![(id.to_string(), st.into())];
@@ -1345,7 +1349,7 @@ pub fn evidence(items: &[(String, String)]) -> Evidence {
         match tone(st) {
             "good" => e.good += 1,
             "part" => e.part += 1,
-            "bad" => e.bad += 1,
+            "bad" | "todo" => e.bad += 1,
             "na" => {}
             _ => e.unknown += 1,
         }
@@ -1388,7 +1392,7 @@ pub fn path_view(ms: &[(Milestone, Evidence)]) -> String {
             let tone = match e.state() {
                 "done" => "good",
                 "in progress" => "part",
-                "not started" => "bad",
+                "not started" => "todo",
                 _ => "none",
             };
             let _ = write!(
@@ -2572,5 +2576,31 @@ mod tests {
             !how.contains("every-candidate"),
             "no comparison of candidates when there are none"
         );
+    }
+
+    #[test]
+    fn not_yet_is_not_failure() {
+        let d = data(&[("backlog", "{\"id\":\"later\",\"status\":\"open\"}")]);
+        let items = evaluate(&d, "backlog:later");
+        assert_eq!(items[0].1, "open");
+        assert_eq!(
+            (tone("open"), sign(tone("open"))),
+            ("todo", "○"),
+            "planned work has its own calm sign, never the red one"
+        );
+        let e = evidence(&items);
+        assert_eq!(e.state(), "not started");
+        let m = Milestone {
+            id: "m".into(),
+            subject: "x".into(),
+            ord: 1,
+            title: "Later".into(),
+            horizon: "working".into(),
+            readiness: 5,
+            criteria: vec![],
+            why: String::new(),
+        };
+        let h = path_view(&[(m, e)]);
+        assert!(h.contains(r#"class="ring todo""#) && !h.contains(r#"class="ring bad""#));
     }
 }
