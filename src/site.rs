@@ -409,6 +409,36 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
             b + "</div>"
         }
         "heartbeat" => format!("{head}{}", made_by_work(data, fam, now_secs())),
+        // the idea of the project the lens is about - or of each project of its family that wrote one
+        "idea" => {
+            let only = k("project");
+            let projects: Vec<String> = if only.is_empty() {
+                fam.to_vec()
+            } else {
+                vec![only]
+            };
+            let written: Vec<&String> = projects
+                .iter()
+                .filter(|p| data.rows("idea").iter().any(|r| s(r, "project") == **p))
+                .collect();
+            let mut b = String::new();
+            for p in &written {
+                if written.len() > 1 {
+                    let name = data
+                        .rows("projects")
+                        .iter()
+                        .find(|x| s(x, "id") == **p)
+                        .map(|x| first(x, &["title", "name"]))
+                        .unwrap_or_else(|| (*p).clone());
+                    let _ = write!(b, "<h1>{}</h1>", esc(&name));
+                }
+                b.push_str(&idea_html(&of(data, "idea", std::slice::from_ref(*p))));
+            }
+            if b.is_empty() {
+                b = idea_html(&[]);
+            }
+            b
+        }
         "ideas" => {
             let mut b = format!(r#"{head}<div class="cards" style="margin-top:28px">"#);
             for r in of(data, "concepts", fam) {
@@ -727,6 +757,9 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 .ladder{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 8px 2px}.steps{display:inline-flex;gap:4px}
 .lvl{display:inline-block;width:26px;height:10px;border-radius:3px;background:var(--soft);border:1px solid var(--line)}.lvl.on{background:var(--accent);border-color:var(--accent)}
 .path .ring.todo{stroke:var(--none)}.mini.todo{background:transparent;border:1px solid var(--none);color:var(--mute);line-height:16px}
+.idea{max-width:760px}.idea p{font-size:18px;line-height:1.7;margin:0 0 18px}.idea .first p{font-size:23px;line-height:1.5;letter-spacing:-.01em;margin-bottom:26px}
+.idea h2{font-size:26px;margin:44px 0 14px}.idea blockquote{margin:26px 0;padding:4px 0 4px 20px;border-left:3px solid var(--accent)}.idea blockquote p{color:var(--mute);margin-bottom:10px}
+.idea blockquote b{display:block;color:var(--fg);margin-bottom:8px;font-size:18px}.idea .limit{background:var(--soft);border-radius:14px;padding:18px 22px 6px;margin:32px 0}.idea .limit h3{margin-top:0}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -1681,8 +1714,9 @@ pub fn subs(data: &Data) -> Vec<Sub> {
         .collect()
 }
 
-const SUB_VIEWS: [(&str, &str); 4] = [
+const SUB_VIEWS: [(&str, &str); 5] = [
     ("", "⟦view-how-close⟧"),
+    ("-idea", "⟦view-idea⟧"),
     ("-backlog", "⟦view-backlog⟧"),
     ("-log", "⟦view-log⟧"),
     ("-ideas", "⟦view-ideas⟧"),
@@ -1767,6 +1801,15 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
     ideas.push_str("</div>");
     vec![
         (format!("{}.html", p.slug), p.title.clone(), how),
+        (
+            format!("{}-idea.html", p.slug),
+            format!("⟦view-idea⟧ · {}", p.title),
+            format!(
+                "{}{}",
+                sub_nav(p, "-idea"),
+                idea_html(&of(data, "idea", &fam))
+            ),
+        ),
         (
             format!("{}-backlog.html", p.slug),
             format!("Backlog · {}", p.title),
@@ -1927,6 +1970,70 @@ pub fn localize(html: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// A passage of prose: paragraphs, and **bold** - made safe first.
+fn rich(text: &str) -> String {
+    text.split("\n\n")
+        .filter(|p| !p.trim().is_empty())
+        .map(|p| {
+            let escaped = esc(p.trim());
+            let mut out = String::new();
+            let mut bold = false;
+            for (i, part) in escaped.split("**").enumerate() {
+                if i > 0 {
+                    out.push_str(if bold { "</b>" } else { "<b>" });
+                    bold = !bold;
+                }
+                out.push_str(part);
+            }
+            if bold {
+                out.push_str("</b>");
+            }
+            format!("<p>{out}</p>")
+        })
+        .collect()
+}
+
+/// A project's idea, as it wrote it: an ordered piece of writing for anyone - the opening, the
+/// problem, the idea, a picture, the honest limit, where it stands - shown as an article to read.
+pub fn idea_html(rows: &[&Row]) -> String {
+    if rows.is_empty() {
+        return r#"<p class="lead">⟦idea-not-written⟧</p>"#.to_string();
+    }
+    let mut rows = rows.to_vec();
+    rows.sort_by_key(|r| n(r, "ord"));
+    let mut b = String::from(r#"<article class="idea">"#);
+    for r in rows {
+        let (heading, text) = (s(r, "heading"), rich(&s(r, "text")));
+        match s(r, "kind").as_str() {
+            "lead" => {
+                let _ = write!(b, r#"<div class="first">{text}</div>"#);
+            }
+            "picture" => {
+                let title = if heading.is_empty() {
+                    String::new()
+                } else {
+                    format!("<b>{}</b>", esc(&heading))
+                };
+                let _ = write!(b, "<blockquote>{title}{text}</blockquote>");
+            }
+            "limit" => {
+                let _ = write!(
+                    b,
+                    r#"<div class="limit"><h3>{}</h3>{text}</div>"#,
+                    esc(&heading)
+                );
+            }
+            _ => {
+                if !heading.is_empty() {
+                    let _ = write!(b, "<h2>{}</h2>", esc(&heading));
+                }
+                b.push_str(&text);
+            }
+        }
+    }
+    b + "</article>"
 }
 
 /// A unix time as "YYYY-MM-DD HH:MM UTC" (civil-from-days, no date library).
@@ -2398,6 +2505,7 @@ mod tests {
             pages.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),
             [
                 "project-tad.html",
+                "project-tad-idea.html",
                 "project-tad-backlog.html",
                 "project-tad-log.html",
                 "project-tad-ideas.html"
@@ -2663,6 +2771,29 @@ mod tests {
         assert!(
             ours < heading && heading < theirs,
             "curated first, then the discovered ones under their own heading"
+        );
+    }
+
+    #[test]
+    fn an_idea_reads_as_an_article_in_its_own_order() {
+        let d = data(&[("idea", "{\"id\":\"b\",\"ord\":2,\"kind\":\"picture\",\"heading\":\"Like a cutting\",\"text\":\"It grows in your soil.\",\"project\":\"o/r\"}\n{\"id\":\"a\",\"ord\":1,\"kind\":\"lead\",\"heading\":\"\",\"text\":\"You do not **own** it.\\n\\nSecond paragraph <here>.\",\"project\":\"o/r\"}\n{\"id\":\"c\",\"ord\":3,\"kind\":\"limit\",\"heading\":\"What is still hard\",\"text\":\"Much.\",\"project\":\"o/r\"}")]);
+        let rows: Vec<&Row> = d.rows("idea").iter().collect();
+        let h = idea_html(&rows);
+        assert!(
+            h.find("You do not").unwrap() < h.find("Like a cutting").unwrap(),
+            "in the order it was written, not the order of ids"
+        );
+        assert!(
+            h.contains("<p>You do not <b>own</b> it.</p><p>Second paragraph &lt;here&gt;.</p>"),
+            "paragraphs and bold, made safe"
+        );
+        assert!(
+            h.contains("<blockquote><b>Like a cutting</b>")
+                && h.contains(r#"<div class="limit"><h3>What is still hard</h3>"#)
+        );
+        assert!(
+            idea_html(&[]).contains("idea-not-written"),
+            "a project that has not written its idea says so"
         );
     }
 }
