@@ -72,3 +72,5 @@ state-in-progress = в работе
 state-not-started = не начато
 state-unknown = пока неизвестно
 why = Зачем:
+discovered-lenses = Найденные линзы
+discovered-lenses-lead = Большие виды, которые обсерватория нашла сама, — их может сделать кто угодно, и рисуются они так же, как её собственные.
