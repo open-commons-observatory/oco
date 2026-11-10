@@ -8,3 +8,5 @@ kind = "tool"
 parent = "open-commons-observatory"
 
 [exports]
+backlog = "oco-data/backlog.json"
+milestones = "oco-data/milestones.json"

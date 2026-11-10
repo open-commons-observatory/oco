@@ -1,0 +1,5 @@
+{"id":"oco-boards","subject":"oco","ord":4,"title":"Boards in the picture","horizon":"perfection","readiness":8,"criteria":"backlog:board-view","why":"Live work beside the paths."}
+{"id":"oco-every-path","subject":"oco","ord":3,"title":"Every project's path and page","horizon":"perfection","readiness":8,"criteria":"backlog:path backlog:project-pages","why":"How close each project is."}
+{"id":"oco-everywhere","subject":"oco","ord":5,"title":"Every platform","horizon":"ongoing","readiness":9,"criteria":"backlog:outlets","why":"Projects found wherever they live."}
+{"id":"oco-finds","subject":"oco","ord":1,"title":"Finds and gathers","horizon":"working","readiness":6,"criteria":"backlog:discover backlog:harvest","why":"The mark found, the tables gathered."}
+{"id":"oco-renders","subject":"oco","ord":2,"title":"Renders the picture","horizon":"working","readiness":7,"criteria":"backlog:site","why":"A designed site from the data."}
