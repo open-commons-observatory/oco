@@ -19,6 +19,9 @@ pub struct Mark {
 pub struct Project {
     pub id: String,
     pub name: String,
+    /// A short title for navigation (optional)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub kind: String,
     pub parent: String,
 }

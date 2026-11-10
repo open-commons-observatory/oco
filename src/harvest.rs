@@ -62,11 +62,9 @@ pub fn harvest(candidates: &[Candidate], source: &dyn Source) -> Harvest {
             continue;
         };
         let id = &mark.project.id;
-        h.projects.push(
-            json!({"id": id, "project": id, "name": mark.project.name, "kind": mark.project.kind,
+        h.projects.push(json!({"id": id, "project": id, "name": mark.project.name, "title": mark.project.title, "kind": mark.project.kind,
             "parent": mark.project.parent, "link": c.found.url, "platform": c.found.platform,
-            "tables": mark.exports.keys().cloned().collect::<Vec<_>>()}),
-        );
+            "tables": mark.exports.keys().cloned().collect::<Vec<_>>()}));
         for (table, path) in &mark.exports {
             match source.read(&c.found, path) {
                 Ok(Some(text)) => {
