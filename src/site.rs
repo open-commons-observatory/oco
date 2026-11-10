@@ -632,12 +632,6 @@ table.grid{border-collapse:collapse;width:100%;font-size:14.5px}
 .board{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}@media(max-width:820px){.board{grid-template-columns:1fr}.bar{grid-template-columns:120px 1fr 48px}}
 .col .card{margin-bottom:12px}
 .pathbox{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 10px}
-svg.path .band{fill:var(--soft)}svg.path .hlabel{font-size:13px;fill:var(--mute);font-weight:600;letter-spacing:.04em}
-svg.path .road{stroke:var(--line);stroke-width:6;stroke-linecap:round}svg.path .travelled{stroke:var(--good);stroke-width:6;stroke-linecap:round}
-svg.path .stop{fill:var(--card);stroke:var(--line);stroke-width:5}svg.path .ring{fill:none;stroke-width:5;stroke-linecap:round}
-svg.path .ring.good{stroke:var(--good)}svg.path .ring.part{stroke:var(--part)}svg.path .ring.bad{stroke:var(--bad)}svg.path .ring.none{stroke:var(--none)}
-svg.path .frac{font-size:10.5px;text-anchor:middle;fill:var(--fg);font-weight:700}svg.path .stitle{font-size:12.5px;text-anchor:middle;fill:var(--fg)}
-svg.path .lvl{fill:var(--soft);stroke:var(--line)}svg.path .lvl.on{fill:var(--accent);stroke:var(--accent)}
 .signs{display:flex;flex-wrap:wrap;gap:3px}.mini{display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:4px;font-size:11px;font-weight:700;color:#fff}
 .mini.good{background:var(--good)}.mini.part{background:var(--part)}.mini.bad{background:var(--bad)}.mini.none{background:var(--soft);color:var(--mute)}.mini.na{background:var(--na);color:var(--mute)}
 .psub{display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:14.5px;padding:0 0 16px;margin-bottom:28px;border-bottom:1px solid var(--line)}
@@ -647,6 +641,16 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 .chip.ci.good{color:var(--good);border-color:var(--good)}.chip.ci.bad{color:var(--bad);border-color:var(--bad)}.chip.ci.part{color:var(--part);border-color:var(--part)}
 .langs{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:14px;white-space:nowrap;color:var(--mute)}
 .langs a{color:var(--mute)}.langs b{color:var(--fg);font-weight:600}.langs .dot{opacity:.6}
+.path .bands{display:flex;gap:8px;overflow-x:auto}.path .band{background:var(--soft);border-radius:14px;padding:10px 6px 12px}
+.path .hlabel{font-size:13px;color:var(--mute);font-weight:600;letter-spacing:.04em}.path .band .hlabel{padding:0 8px 10px}
+.path .stops{display:flex}.stopcell{position:relative;flex:1 1 0;min-width:84px;display:flex;flex-direction:column;align-items:center;padding:0 5px}
+.stopcell::before{content:"";position:absolute;top:17px;left:0;right:0;height:6px;background:var(--line)}.stopcell.passed::before{background:var(--good)}
+.stopcell svg{position:relative;z-index:1}.path .stop{fill:var(--card);stroke:var(--line);stroke-width:5}.path .ring{fill:none;stroke-width:5;stroke-linecap:round}
+.path .ring.good{stroke:var(--good)}.path .ring.part{stroke:var(--part)}.path .ring.bad{stroke:var(--bad)}.path .ring.none{stroke:var(--none)}
+.frac{position:absolute;top:13px;left:0;right:0;z-index:2;text-align:center;font-size:10.5px;line-height:14px;font-weight:700}
+.stitle{margin-top:7px;max-width:100%;text-align:center;font-size:12.5px;line-height:1.25;overflow-wrap:anywhere;hyphens:auto}
+.ladder{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 8px 2px}.steps{display:inline-flex;gap:4px}
+.lvl{display:inline-block;width:26px;height:10px;border-radius:3px;background:var(--soft);border:1px solid var(--line)}.lvl.on{background:var(--accent);border-color:var(--accent)}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -947,7 +951,7 @@ fn grand_overview_card(data: &Data, g: &Grand) -> String {
     let path = if rated.is_empty() {
         String::new()
     } else {
-        path_svg(&rated)
+        path_view(&rated)
     };
     format!(
         r#"<a class="grand" href="{}/index.html"><h3>{}</h3><p>{}</p>{path}<p>{} · {} projects</p></a>"#,
@@ -999,7 +1003,7 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
                 p.slug,
                 esc(&p.title),
                 esc(&p.goal),
-                path_svg(&rated),
+                path_view(&rated),
                 rated.len(),
                 readiness(&rated)
             );
@@ -1282,89 +1286,75 @@ const HORIZONS: [(&str, &str); 3] = [
 
 /// The path: three horizons, a stop per milestone with its evidence, the way travelled so far, and
 /// the readiness ladder.
-pub fn path_svg(ms: &[(Milestone, Evidence)]) -> String {
-    let (w, top, line_y) = (1000.0_f64, 34.0_f64, 96.0_f64);
-    let total = ms.len().max(1) as f64;
-    let mut svg = format!(
-        r#"<svg class="path" viewBox="0 0 {w} 210" width="100%" role="img" aria-label="the path">"#
-    );
-    let mut x0 = 20.0;
-    let span = w - 40.0;
-    let mut stops: Vec<(f64, &Milestone, &Evidence)> = Vec::new();
+pub fn path_view(ms: &[(Milestone, Evidence)]) -> String {
+    // Words are laid out by the browser, never placed in a drawing: each stop is a cell of its own,
+    // its label ordinary text that wraps inside the cell and cannot run into its neighbour (text in
+    // SVG cannot wrap and knows nothing of what is beside it). The drawings hold shapes only.
+    let in_order: Vec<&(Milestone, Evidence)> = HORIZONS
+        .iter()
+        .flat_map(|(h, _)| ms.iter().filter(move |(m, _)| m.horizon == *h))
+        .collect();
+    // the road is travelled only as far as every stop before it is done
+    let run = in_order
+        .iter()
+        .take_while(|(_, e)| e.state() == "done")
+        .count();
+    let circumference = 2.0 * std::f64::consts::PI * 15.0;
+    let mut out = String::from(r#"<div class="path"><div class="bands">"#);
+    let mut index = 0;
     for (h, label) in HORIZONS {
         let in_h: Vec<&(Milestone, Evidence)> = ms.iter().filter(|(m, _)| m.horizon == h).collect();
-        let bw = span * (in_h.len().max(1) as f64 / total.max(3.0)).max(0.12);
         let _ = write!(
-            svg,
-            r#"<rect x="{x0:.1}" y="{top}" width="{:.1}" height="124" rx="14" class="band"/><text x="{:.1}" y="{}" class="hlabel">{label}</text>"#,
-            bw - 8.0,
-            x0 + 14.0,
-            top + 22.0
+            out,
+            r#"<div class="band" style="flex:{} 1 0"><div class="hlabel">{label}</div><div class="stops">"#,
+            in_h.len().max(1)
         );
-        for (i, (m, e)) in in_h.iter().enumerate() {
-            stops.push((x0 + bw * (i as f64 + 0.5) / in_h.len() as f64, m, e));
+        for (m, e) in in_h {
+            let tone = match e.state() {
+                "done" => "good",
+                "in progress" => "part",
+                "not started" => "bad",
+                _ => "none",
+            };
+            let _ = write!(
+                out,
+                r#"<div class="stopcell{}" title="{}: {} - {} of {} criteria good, {} partly, {} not yet, {} unknown"><svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true"><circle cx="20" cy="20" r="15" class="stop"/><circle cx="20" cy="20" r="15" class="ring {tone}" stroke-dasharray="{:.1} {circumference:.1}" transform="rotate(-90 20 20)"/></svg><span class="frac">{}/{}</span><span class="stitle">{}</span></div>"#,
+                if index < run { " passed" } else { "" },
+                esc(&m.title),
+                e.state(),
+                e.good,
+                e.total(),
+                e.part,
+                e.bad,
+                e.unknown,
+                circumference * e.share(),
+                e.good,
+                e.total(),
+                esc(&m.title)
+            );
+            index += 1;
         }
-        x0 += bw;
+        out.push_str("</div></div>");
     }
-    // the road is travelled only as far as every stop before it is done
-    let run = stops
-        .iter()
-        .take_while(|(_, _, e)| e.state() == "done")
-        .count();
-    let reached = if run == 0 { 20.0 } else { stops[run - 1].0 };
-    let _ = write!(
-        svg,
-        r#"<line x1="20" y1="{line_y}" x2="{:.1}" y2="{line_y}" class="road"/><line x1="20" y1="{line_y}" x2="{reached:.1}" y2="{line_y}" class="travelled"/>"#,
-        x0 - 8.0
-    );
-    for (x, m, e) in &stops {
-        let r = 15.0;
-        let c = 2.0 * std::f64::consts::PI * r;
-        let tn = match e.state() {
-            "done" => "good",
-            "in progress" => "part",
-            "not started" => "bad",
-            _ => "none",
-        };
-        let _ = write!(
-            svg,
-            r#"<g><title>{}: {} - {} of {} criteria good, {} partly, {} not yet, {} unknown</title><circle cx="{x:.1}" cy="{line_y}" r="{r}" class="stop"/><circle cx="{x:.1}" cy="{line_y}" r="{r}" class="ring {tn}" stroke-dasharray="{:.1} {c:.1}" transform="rotate(-90 {x:.1} {line_y})"/><text x="{x:.1}" y="{}" class="frac">{}/{}</text><text x="{x:.1}" y="{}" class="stitle">{}</text></g>"#,
-            esc(&m.title),
-            e.state(),
-            e.good,
-            e.total(),
-            e.part,
-            e.bad,
-            e.unknown,
-            c * e.share(),
-            line_y + 4.5,
-            e.good,
-            e.total(),
-            line_y + 40.0,
-            esc(&cut(&m.title, 22))
-        );
-    }
+    out.push_str("</div>");
     // readiness is earned in order: the highest level in the unbroken run of done milestones
     let level = readiness(ms);
-    let _ = write!(
-        svg,
-        r#"<text x="20" y="196" class="hlabel">⟦readiness⟧</text>"#
+    let level_text = esc(&crate::i18n::tn("level-of-9", level));
+    out.push_str(
+        r#"<div class="ladder"><span class="hlabel">⟦readiness⟧</span><span class="steps">"#,
     );
     for l in 1..=9 {
         let _ = write!(
-            svg,
-            r#"<rect x="{}" y="186" width="26" height="10" rx="3" class="{}"><title>readiness level {l}</title></rect>"#,
-            112 + (l - 1) * 30,
+            out,
+            r#"<span class="{}" title="readiness level {l}"></span>"#,
             if l <= level { "lvl on" } else { "lvl" }
         );
     }
-    let level_text = esc(&crate::i18n::tn("level-of-9", level));
     let _ = write!(
-        svg,
-        r#"<text x="{}" y="196" class="hlabel">{level_text}</text>"#,
-        112 + 9 * 30 + 6
+        out,
+        r#"</span><span class="hlabel">{level_text}</span></div></div>"#
     );
-    svg + "</svg>"
+    out
 }
 
 /// The readiness a path has earned: the highest level among its milestones done in an unbroken run
@@ -1394,7 +1384,7 @@ fn path_section(data: &Data, title: &str, ms: &[Milestone]) -> String {
     let mut b = format!(
         r#"<h2>{}</h2><div class="pathbox">{}</div><div class="cards" style="margin-top:16px">"#,
         esc(title),
-        path_svg(&rated)
+        path_view(&rated)
     );
     for (m, e) in &rated {
         let items: Vec<(String, String)> =
@@ -2234,7 +2224,7 @@ mod tests {
             bad: 0,
             unknown: 0,
         };
-        let svg = path_svg(&[(m("a", "working"), e), (m("b", "ongoing"), e)]);
+        let svg = path_view(&[(m("a", "working"), e), (m("b", "ongoing"), e)]);
         assert_eq!(svg.matches(r#"class="stop""#).count(), 2);
         assert_eq!(svg.matches("readiness level").count(), 9);
         assert!(
@@ -2416,6 +2406,41 @@ mod tests {
             grands(&d.localized("en"))[0].title,
             "Linux Phones",
             "untranslated: as written"
+        );
+    }
+
+    #[test]
+    fn words_are_laid_out_by_the_browser_never_placed_in_a_drawing() {
+        let long = "Everything a phone does, and every other thing anyone could ask of it";
+        let m = |title: &str| Milestone {
+            id: "m".into(),
+            subject: "x".into(),
+            ord: 1,
+            title: title.into(),
+            horizon: "working".into(),
+            readiness: 6,
+            criteria: vec![],
+            why: String::new(),
+        };
+        let e = Evidence {
+            good: 0,
+            part: 1,
+            bad: 0,
+            unknown: 0,
+        };
+        let h = path_view(&[(m(long), e), (m("Calls and messages"), e)]);
+        assert!(
+            h.contains(&format!(r#"<span class="stitle">{long}</span>"#)),
+            "the whole title, never cut"
+        );
+        assert!(
+            !h.contains("<text"),
+            "no words inside SVG: they could not wrap, and would overlap"
+        );
+        assert_eq!(
+            h.matches(r#"class="stopcell"#).count(),
+            2,
+            "each stop a cell of its own"
         );
     }
 }
