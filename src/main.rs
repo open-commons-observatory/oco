@@ -2,10 +2,12 @@
 //!
 //!   oco discover [--kind KIND] [--json]   every marked project the outlets find, each confirmed by its mark
 //!   oco harvest --out DIR                  their exported tables, tagged and merged, as the observatory's tad data
+//!   oco site --data DIR --out DIR          the observatory's website from that data
 
 mod discover;
 mod harvest;
 mod mark;
+mod site;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -33,10 +35,21 @@ enum Cmd {
         #[arg(long)]
         out: std::path::PathBuf,
     },
+    /// Render the observatory's website from harvested data
+    Site {
+        #[arg(long)]
+        data: std::path::PathBuf,
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
+        Cmd::Site { data, out } => {
+            site::render(&site::Data::load(&data)?, &out)?;
+            println!("site -> {}", out.display());
+        }
         Cmd::Harvest { out } => {
             let gh = discover::GitHub::new();
             let found = discover::discover(&[(&gh, &gh)], None)?;
