@@ -1022,8 +1022,11 @@ fn grand_overview_card(data: &Data, g: &Grand) -> String {
     let rated: Vec<(Milestone, Evidence)> = ms
         .iter()
         .map(|m| {
-            let items: Vec<(String, String)> =
-                m.criteria.iter().flat_map(|c| evaluate(data, c)).collect();
+            let items: Vec<(String, String)> = m
+                .criteria
+                .iter()
+                .flat_map(|c| evaluate(data, &m.project, c))
+                .collect();
             (m.clone(), evidence(&items))
         })
         .collect();
@@ -1056,8 +1059,14 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
         projects.len(),
         data.rows("session_log").len()
     );
-    for g in grands {
+    for g in grands.iter().filter(|g| g.curated) {
         b.push_str(&grand_overview_card(data, g));
+    }
+    if grands.iter().any(|g| !g.curated) {
+        b.push_str(r#"<h2>⟦discovered-lenses⟧</h2><p class="lead">⟦discovered-lenses-lead⟧</p>"#);
+        for g in grands.iter().filter(|g| !g.curated) {
+            b.push_str(&grand_overview_card(data, g));
+        }
     }
     // the other projects with a path of their own: a card each, linking to its pages
     let all = subs(data);
@@ -1212,6 +1221,8 @@ pub struct Milestone {
     pub readiness: i64,
     pub criteria: Vec<String>,
     pub why: String,
+    /// the project whose milestone this is: its criteria are read there first
+    pub project: String,
 }
 
 fn milestones_of(rows: &[&Row]) -> Vec<Milestone> {
@@ -1229,6 +1240,7 @@ fn milestones_of(rows: &[&Row]) -> Vec<Milestone> {
                 .map(String::from)
                 .collect(),
             why: s(r, "why"),
+            project: s(r, "project"),
         })
         .collect();
     ms.sort_by_key(|m| (m.subject.clone(), m.ord));
@@ -1237,7 +1249,7 @@ fn milestones_of(rows: &[&Row]) -> Vec<Milestone> {
 
 /// One criterion, read from the data: (what, status) for each thing it names - `feature:ID@PLATFORM`,
 /// `component:ID@DEVICE` (`*` for every one), `tests@DEVICE` (the latest run), `backlog:ID`.
-pub fn evaluate(data: &Data, criterion: &str) -> Vec<(String, String)> {
+pub fn evaluate(data: &Data, project: &str, criterion: &str) -> Vec<(String, String)> {
     let status_in = |table: &str, a: &str, av: &str, b: &str, bv: &str| -> String {
         data.rows(table)
             .iter()
@@ -1294,7 +1306,9 @@ pub fn evaluate(data: &Data, criterion: &str) -> Vec<(String, String)> {
         let st = match data
             .rows("backlog")
             .iter()
-            .find(|r| s(r, "id") == id)
+            // in the milestone's own project first; then anywhere - a path may read another project's work
+            .find(|r| s(r, "id") == id && s(r, "project") == project)
+            .or_else(|| data.rows("backlog").iter().find(|r| s(r, "id") == id))
             .map(|r| s(r, "status"))
         {
             Some(x) if x == "done" => "works",
@@ -1455,8 +1469,11 @@ fn path_section(data: &Data, title: &str, ms: &[Milestone]) -> String {
     let rated: Vec<(Milestone, Evidence)> = ms
         .iter()
         .map(|m| {
-            let items: Vec<(String, String)> =
-                m.criteria.iter().flat_map(|c| evaluate(data, c)).collect();
+            let items: Vec<(String, String)> = m
+                .criteria
+                .iter()
+                .flat_map(|c| evaluate(data, &m.project, c))
+                .collect();
             (m.clone(), evidence(&items))
         })
         .collect();
@@ -1466,8 +1483,11 @@ fn path_section(data: &Data, title: &str, ms: &[Milestone]) -> String {
         path_view(&rated)
     );
     for (m, e) in &rated {
-        let items: Vec<(String, String)> =
-            m.criteria.iter().flat_map(|c| evaluate(data, c)).collect();
+        let items: Vec<(String, String)> = m
+            .criteria
+            .iter()
+            .flat_map(|c| evaluate(data, &m.project, c))
+            .collect();
         let mut signs = String::new();
         for (what, st) in items.iter().take(60) {
             let tn = tone(st);
@@ -1599,8 +1619,11 @@ fn how_we_work(data: &Data) -> String {
 fn rate(data: &Data, ms: &[Milestone]) -> Vec<(Milestone, Evidence)> {
     ms.iter()
         .map(|m| {
-            let items: Vec<(String, String)> =
-                m.criteria.iter().flat_map(|c| evaluate(data, c)).collect();
+            let items: Vec<(String, String)> = m
+                .criteria
+                .iter()
+                .flat_map(|c| evaluate(data, &m.project, c))
+                .collect();
             (m.clone(), evidence(&items))
         })
         .collect()
@@ -2252,19 +2275,19 @@ mod tests {
             ("backlog", "{\"id\":\"up\",\"status\":\"in-progress\"}"),
         ]);
         assert_eq!(
-            evaluate(&d, "feature:*@linux-best"),
+            evaluate(&d, "", "feature:*@linux-best"),
             [
                 ("calls".to_string(), "works".to_string()),
                 ("sms".to_string(), "unknown".to_string())
             ]
         );
         assert_eq!(
-            evaluate(&d, "tests@p")[0].1,
+            evaluate(&d, "", "tests@p")[0].1,
             "works",
             "the latest run counts"
         );
-        assert_eq!(evaluate(&d, "backlog:up")[0].1, "partial");
-        assert_eq!(evaluate(&d, "backlog:gone")[0].1, "unknown");
+        assert_eq!(evaluate(&d, "", "backlog:up")[0].1, "partial");
+        assert_eq!(evaluate(&d, "", "backlog:gone")[0].1, "unknown");
     }
 
     #[test]
@@ -2296,6 +2319,7 @@ mod tests {
             readiness: 6,
             criteria: vec![],
             why: String::new(),
+            project: String::new(),
         };
         let e = Evidence {
             good: 1,
@@ -2323,6 +2347,7 @@ mod tests {
             readiness: r,
             criteria: vec![],
             why: String::new(),
+            project: String::new(),
         };
         let done = Evidence {
             good: 1,
@@ -2500,6 +2525,7 @@ mod tests {
             readiness: 6,
             criteria: vec![],
             why: String::new(),
+            project: String::new(),
         };
         let e = Evidence {
             good: 0,
@@ -2581,7 +2607,7 @@ mod tests {
     #[test]
     fn not_yet_is_not_failure() {
         let d = data(&[("backlog", "{\"id\":\"later\",\"status\":\"open\"}")]);
-        let items = evaluate(&d, "backlog:later");
+        let items = evaluate(&d, "", "backlog:later");
         assert_eq!(items[0].1, "open");
         assert_eq!(
             (tone("open"), sign(tone("open"))),
@@ -2599,8 +2625,44 @@ mod tests {
             readiness: 5,
             criteria: vec![],
             why: String::new(),
+            project: String::new(),
         };
         let h = path_view(&[(m, e)]);
         assert!(h.contains(r#"class="ring todo""#) && !h.contains(r#"class="ring bad""#));
+    }
+
+    #[test]
+    fn a_criterion_is_read_in_its_own_project_first_then_anywhere() {
+        let d = data(&[("backlog", "{\"id\":\"site\",\"status\":\"open\",\"project\":\"a/one\"}\n{\"id\":\"site\",\"status\":\"done\",\"project\":\"b/two\"}\n{\"id\":\"rhizcut\",\"status\":\"in-progress\",\"project\":\"c/eco\"}")]);
+        assert_eq!(
+            evaluate(&d, "b/two", "backlog:site")[0].1,
+            "works",
+            "its own project's item, not the first one found"
+        );
+        assert_eq!(evaluate(&d, "a/one", "backlog:site")[0].1, "open");
+        assert_eq!(
+            evaluate(&d, "a/one", "backlog:rhizcut")[0].1,
+            "partial",
+            "another project's work, when its own has none: chaining"
+        );
+    }
+
+    #[test]
+    fn lenses_not_curated_are_shown_as_discovered() {
+        let d = data(&[
+            ("lenses", "{\"id\":\"o/lens\",\"project\":\"o/lens\",\"lens\":{\"lens\":{\"title\":\"Ours\"},\"view\":[]}}\n{\"id\":\"x/lens\",\"project\":\"x/lens\",\"lens\":{\"lens\":{\"title\":\"Theirs\"},\"view\":[]}}"),
+            ("curated", "{\"id\":\"o/lens\",\"order\":1}"),
+        ]);
+        let g = grands(&d);
+        let page = observatory(&d, &g);
+        let (ours, heading, theirs) = (
+            page.find("Ours").unwrap(),
+            page.find("discovered-lenses").unwrap(),
+            page.find("Theirs").unwrap(),
+        );
+        assert!(
+            ours < heading && heading < theirs,
+            "curated first, then the discovered ones under their own heading"
+        );
     }
 }

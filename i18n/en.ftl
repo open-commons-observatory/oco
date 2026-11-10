@@ -71,3 +71,5 @@ state-in-progress = in progress
 state-not-started = not started
 state-unknown = not known yet
 why = Why:
+discovered-lenses = Discovered lenses
+discovered-lenses-lead = Grand views the observatory found, made by anyone - drawn the same way as its own.
