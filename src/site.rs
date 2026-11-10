@@ -422,6 +422,10 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
                 .filter(|p| data.rows("idea").iter().any(|r| s(r, "project") == **p))
                 .collect();
             let mut b = String::new();
+            // one project: its name leads the page, for a reader arriving with nothing
+            if written.len() == 1 {
+                let _ = write!(b, "<h1>{}</h1>", esc(&g.title));
+            }
             for p in &written {
                 if written.len() > 1 {
                     let name = data
