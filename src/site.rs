@@ -710,6 +710,32 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
     for g in grands {
         b.push_str(&grand_overview_card(data, g));
     }
+    // the other projects with a path of their own - the same view, below the grand projects
+    let others: Vec<&Row> = projects
+        .iter()
+        .filter(|p| {
+            s(p, "kind") != "picture"
+                && data
+                    .rows("milestones")
+                    .iter()
+                    .any(|m| s(m, "project") == s(p, "id"))
+        })
+        .collect();
+    if !others.is_empty() {
+        b.push_str(r#"<h2>Other projects on their way</h2>"#);
+        for p in others {
+            let rows: Vec<&Row> = data
+                .rows("milestones")
+                .iter()
+                .filter(|m| s(m, "project") == s(p, "id"))
+                .collect();
+            let name = s(p, "name");
+            let title = Some(s(p, "title"))
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| name.split(':').next().unwrap_or(&name).trim().to_string());
+            b.push_str(&path_section(data, &title, &milestones_of(&rows)));
+        }
+    }
     let ids: Vec<String> = projects.iter().map(|p| s(p, "id")).collect();
     let mut parents: Vec<String> = Vec::new();
     for p in projects {
