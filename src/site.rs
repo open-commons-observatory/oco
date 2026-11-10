@@ -272,7 +272,11 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
         }
         "runs" => format!(
             r#"{head}{}<div class="scroll" style="padding:16px">{}</div>"#,
-            legend(&[("good", "passed"), ("bad", "failed"), ("none", "skipped")]),
+            legend(&[
+                ("good", "⟦passed⟧"),
+                ("bad", "⟦failed⟧"),
+                ("none", "⟦skipped⟧")
+            ]),
             runs_chart(&of(data, "test_runs", fam))
         ),
         "backlog" => backlog(&of(data, "backlog", fam)),
@@ -571,6 +575,10 @@ struct Page<'a> {
 impl Page<'_> {
     /// A page: the observatory's tabs (itself, then each grand project), a grand project's own views.
     fn render(&self, grand: Option<&Grand>, view: &str, title: &str, body: &str) -> String {
+        localize(&self.render_raw(grand, view, title, body))
+    }
+
+    fn render_raw(&self, grand: Option<&Grand>, view: &str, title: &str, body: &str) -> String {
         let up = if grand.is_some() { "../" } else { "" };
         let here = |v: &str| {
             if grand.is_none() && view == v {
@@ -718,23 +726,23 @@ fn how_close(data: &Data, g: &Grand, fam: &[String]) -> String {
     let ms = milestones_of(&of(data, "milestones", fam));
     let mine: Vec<Milestone> = ms.iter().filter(|m| m.subject == g.slug).cloned().collect();
     if !mine.is_empty() {
-        b.push_str(&path_section(data, "The path", &mine));
+        b.push_str(&path_section(data, "⟦the-path⟧", &mine));
         b.push_str(&made_by_work(data, fam, now_secs()));
     }
     if let Some(l) = cols.iter().find(|c| c.kind == "linux") {
         let [w, p, m, u] = tally(&cells, &ids, &l.id);
         let _ = write!(
             b,
-            r#"<div class="stats"><div class="stat"><b>{w}</b><span>features known to work on {}</span></div><div class="stat"><b>{p}</b><span>partly</span></div><div class="stat"><b>{m}</b><span>missing</span></div><div class="stat"><b>{u}</b><span>not known yet - to measure</span></div></div>"#,
+            r#"<div class="stats"><div class="stat"><b>{w}</b><span>⟦features-known-to-work-on⟧ {}</span></div><div class="stat"><b>{p}</b><span>⟦partly⟧</span></div><div class="stat"><b>{m}</b><span>⟦missing⟧</span></div><div class="stat"><b>{u}</b><span>⟦not-known-to-measure⟧</span></div></div>"#,
             esc(&l.name)
         );
     }
-    b.push_str(r#"<h2>Every candidate, feature by feature</h2>"#);
+    b.push_str(r#"<h2>⟦every-candidate⟧</h2>"#);
     b.push_str(&legend(&[
-        ("good", "works"),
-        ("part", "partly"),
-        ("bad", "missing"),
-        ("none", "not known yet"),
+        ("good", "⟦works⟧"),
+        ("part", "⟦partly⟧"),
+        ("bad", "⟦missing⟧"),
+        ("none", "⟦not-known-yet⟧"),
     ]));
     b.push_str(r#"<div class="bars">"#);
     for c in &cols {
@@ -761,7 +769,7 @@ fn how_close(data: &Data, g: &Grand, fam: &[String]) -> String {
         }
         let _ = write!(b, r#"</div><b>{}/{}</b></div>"#, t[0], ids.len());
     }
-    b.push_str("</div><h2>By area</h2>");
+    b.push_str("</div><h2>⟦by-area⟧</h2>");
     let mut groups: Vec<&str> = Vec::new();
     for l in &lines {
         if !groups.contains(&l.group.as_str()) {
@@ -876,8 +884,8 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
         .filter(|r| s(r, "status") != "done")
         .count();
     let mut b = format!(
-        r#"<h1>Open Commons Observatory</h1><p class="lead">One living picture of the open commons. Every project keeps its own state as data; the observatory finds the marked ones and gathers what they share - nothing is wired in by hand.</p>
-<div class="stats"><div class="stat"><b>{}</b><span>grand projects</span></div><div class="stat"><b>{}</b><span>projects in the picture</span></div><div class="stat"><b>{open}</b><span>open items, all backlogs</span></div><div class="stat"><b>{}</b><span>session log entries</span></div></div><h2>Grand projects</h2>"#,
+        r#"<h1>Open Commons Observatory</h1><p class="lead">⟦observatory-lead⟧</p>
+<div class="stats"><div class="stat"><b>{}</b><span>⟦stat-grand-projects⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-projects⟧</span></div><div class="stat"><b>{open}</b><span>⟦stat-open-items⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-log-entries⟧</span></div></div><h2>⟦grand-projects⟧</h2>"#,
         grands.len(),
         projects.len(),
         data.rows("session_log").len()
@@ -887,10 +895,7 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
     }
     // the other projects with a path of their own: a card each, linking to its pages
     let all = subs(data);
-    for (heading, home) in [
-        ("The observatory itself", true),
-        ("Other projects on their way", false),
-    ] {
+    for (heading, home) in [("⟦observatory-itself⟧", true), ("⟦other-projects⟧", false)] {
         let group: Vec<&Sub> = all
             .iter()
             .filter(|p| p.id.starts_with(HOME) == home)
@@ -924,7 +929,7 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
             parents.push(s(p, "parent"));
         }
     }
-    b.push_str("<h2>Every project</h2>");
+    b.push_str("<h2>⟦every-project⟧</h2>");
     for par in parents.iter().filter(|p| !ids.contains(p)) {
         let _ = write!(b, "<h3>{}</h3><div class=\"cards\">", esc(par));
         for p in projects.iter().filter(|p| s(p, "parent") == *par) {
@@ -946,7 +951,7 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
     }
     let mut log: Vec<&Row> = data.rows("session_log").iter().collect();
     log.sort_by_key(|r| std::cmp::Reverse(s(r, "entry_date")));
-    b.push_str("<h2>Latest work</h2>");
+    b.push_str("<h2>⟦latest-work⟧</h2>");
     for r in log.into_iter().take(4) {
         let _ = write!(
             b,
@@ -1005,12 +1010,12 @@ pub fn runs_chart(runs: &[&Row]) -> String {
 
 fn backlog(rows: &[&Row]) -> String {
     let mut b = String::from(
-        r#"<h1>Backlog</h1><p class="lead">The work ahead and done.</p><div class="board" style="margin-top:32px">"#,
+        r#"<h1>⟦view-backlog⟧</h1><p class="lead">⟦backlog-lead⟧</p><div class="board" style="margin-top:32px">"#,
     );
     for (st, title) in [
-        ("open", "Open"),
-        ("in-progress", "In progress"),
-        ("done", "Done"),
+        ("open", "⟦open⟧"),
+        ("in-progress", "⟦in-progress⟧"),
+        ("done", "⟦done⟧"),
     ] {
         let items: Vec<&&Row> = rows.iter().filter(|r| s(r, "status") == st).collect();
         let _ = write!(b, r#"<div class="col"><h3>{title} · {}</h3>"#, items.len());
@@ -1187,9 +1192,9 @@ pub fn evidence(items: &[(String, String)]) -> Evidence {
 }
 
 const HORIZONS: [(&str, &str); 3] = [
-    ("working", "Working"),
-    ("perfection", "Perfection"),
-    ("ongoing", "Ongoing perfection"),
+    ("working", "⟦horizon-working⟧"),
+    ("perfection", "⟦horizon-perfection⟧"),
+    ("ongoing", "⟦horizon-ongoing⟧"),
 ];
 
 /// The path: three horizons, a stop per milestone with its evidence, the way travelled so far, and
@@ -1260,7 +1265,7 @@ pub fn path_svg(ms: &[(Milestone, Evidence)]) -> String {
     let level = readiness(ms);
     let _ = write!(
         svg,
-        r#"<text x="20" y="196" class="hlabel">Readiness</text>"#
+        r#"<text x="20" y="196" class="hlabel">⟦readiness⟧</text>"#
     );
     for l in 1..=9 {
         let _ = write!(
@@ -1354,12 +1359,10 @@ fn from(r: &Row) -> String {
 /// How the commons works: the canon's principles and architectures, every practice and concept -
 /// each card naming the project it comes from.
 fn how_we_work(data: &Data) -> String {
-    let mut b = String::from(
-        r#"<h1>How we work</h1><p class="lead">The principles, architectures, practices and concepts the commons works by - kept as data in the canon and the observatory, read by people and agents alike.</p>"#,
-    );
+    let mut b = String::from(r#"<h1>⟦nav-how-we-work⟧</h1><p class="lead">⟦how-we-work-lead⟧</p>"#);
     let principles = data.rows("principles");
     if !principles.is_empty() {
-        b.push_str("<h2>Principles</h2>");
+        b.push_str("<h2>⟦principles⟧</h2>");
         let mut cats: Vec<String> = Vec::new();
         for r in principles {
             if !cats.contains(&s(r, "category")) {
@@ -1382,7 +1385,7 @@ fn how_we_work(data: &Data) -> String {
                     if s(r, "caveat").is_empty() {
                         String::new()
                     } else {
-                        format!(r#"<p><b>But:</b> {}</p>"#, esc(&s(r, "caveat")))
+                        format!(r#"<p><b>⟦but⟧</b> {}</p>"#, esc(&s(r, "caveat")))
                     },
                     if origin.is_empty() {
                         String::new()
@@ -1397,11 +1400,11 @@ fn how_we_work(data: &Data) -> String {
     }
     let arch = data.rows("architectures");
     if !arch.is_empty() {
-        b.push_str(r#"<h2>Architectures</h2><div class="cards">"#);
+        b.push_str(r#"<h2>⟦architectures⟧</h2><div class="cards">"#);
         for r in arch {
             let _ = write!(
                 b,
-                r#"<div class="card"><h4>{}</h4><p>{}</p><p><b>Best when:</b> {}</p><p><span class="chip">{}</span></p></div>"#,
+                r#"<div class="card"><h4>{}</h4><p>{}</p><p><b>⟦best-when⟧</b> {}</p><p><span class="chip">{}</span></p></div>"#,
                 esc(&s(r, "name")),
                 esc(&s(r, "essence")),
                 esc(&s(r, "best_when")),
@@ -1410,7 +1413,7 @@ fn how_we_work(data: &Data) -> String {
         }
         b.push_str("</div>");
     }
-    for (table, title) in [("practices", "Practices"), ("concepts", "Concepts")] {
+    for (table, title) in [("practices", "⟦practices⟧"), ("concepts", "⟦concepts⟧")] {
         let rows = data.rows(table);
         if rows.is_empty() {
             continue;
@@ -1498,10 +1501,10 @@ pub fn subs(data: &Data) -> Vec<Sub> {
 }
 
 const SUB_VIEWS: [(&str, &str); 4] = [
-    ("", "How close we are"),
-    ("-backlog", "Backlog"),
-    ("-log", "Log"),
-    ("-ideas", "Ideas"),
+    ("", "⟦view-how-close⟧"),
+    ("-backlog", "⟦view-backlog⟧"),
+    ("-log", "⟦view-log⟧"),
+    ("-ideas", "⟦view-ideas⟧"),
 ];
 
 fn sub_nav(p: &Sub, here: &str) -> String {
@@ -1514,7 +1517,7 @@ fn sub_nav(p: &Sub, here: &str) -> String {
             if suffix == here { r#" class="on""# } else { "" }
         );
     }
-    let _ = write!(x, r#"<a href="{}">repository ↗</a></div>"#, esc(&p.link));
+    let _ = write!(x, r#"<a href="{}">⟦repository⟧ ↗</a></div>"#, esc(&p.link));
     x
 }
 
@@ -1527,7 +1530,7 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
     let back = of(data, "backlog", &fam);
     let count = |st: &str| back.iter().filter(|r| s(r, "status") == st).count();
     let mut how = format!(
-        r#"{}<h1>{}</h1><p class="lead">{}</p><div class="stats"><div class="stat"><b>{done} of {}</b><span>milestones done</span></div><div class="stat"><b>{}</b><span>readiness, of 9</span></div><div class="stat"><b>{}</b><span>in progress</span></div><div class="stat"><b>{}</b><span>open</span></div></div>"#,
+        r#"{}<h1>{}</h1><p class="lead">{}</p><div class="stats"><div class="stat"><b>{done} of {}</b><span>⟦milestones-done⟧</span></div><div class="stat"><b>{}</b><span>⟦readiness-of-9⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-in-progress⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-open⟧</span></div></div>"#,
         sub_nav(p, ""),
         esc(&p.title),
         esc(&p.goal),
@@ -1536,19 +1539,19 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
         count("in-progress"),
         count("open")
     );
-    how.push_str(&path_section(data, "The path", &ms));
+    how.push_str(&path_section(data, "⟦the-path⟧", &ms));
     how.push_str(&made_by_work(data, &fam, now_secs()));
     let mut logs = of(data, "session_log", &fam);
     logs.sort_by_key(|r| std::cmp::Reverse(s(r, "entry_date")));
     let mut log = format!(
-        r#"{}<h1>Log</h1><p class="lead">How the work went - what was done, considered and rejected.</p>"#,
+        r#"{}<h1>⟦view-log⟧</h1><p class="lead">⟦log-lead⟧</p>"#,
         sub_nav(p, "-log")
     );
     for r in logs {
         let rejected = if s(r, "rejected").is_empty() {
             String::new()
         } else {
-            format!(r#"<p><b>Rejected:</b> {}</p>"#, esc(&s(r, "rejected")))
+            format!(r#"<p><b>⟦rejected⟧</b> {}</p>"#, esc(&s(r, "rejected")))
         };
         let _ = write!(
             log,
@@ -1559,7 +1562,7 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
         );
     }
     let mut ideas = format!(
-        r#"{}<h1>Ideas</h1><p class="lead">Its concepts, and the decisions taken - with what was rejected.</p><div class="cards">"#,
+        r#"{}<h1>⟦view-ideas⟧</h1><p class="lead">⟦ideas-lead⟧</p><div class="cards">"#,
         sub_nav(p, "-ideas")
     );
     for r in of(data, "concepts", &fam) {
@@ -1573,7 +1576,7 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
     for r in of(data, "decisions", &fam) {
         let _ = write!(
             ideas,
-            r#"<div class="card"><h4>{}</h4><p>{}</p><p><b>Rejected:</b> {}</p><p><span class="chip">{}</span></p></div>"#,
+            r#"<div class="card"><h4>{}</h4><p>{}</p><p><b>⟦rejected⟧</b> {}</p><p><span class="chip">{}</span></p></div>"#,
             esc(&s(r, "decision")),
             esc(&s(r, "why")),
             esc(&s(r, "rejected")),
@@ -1605,10 +1608,10 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
 const HOME: &str = "open-commons-observatory/";
 
 fn family_bar(data: &Data, here: &str) -> String {
-    let mut x = String::from(r#"<div class="psub"><b>Observatory</b>"#);
+    let mut x = String::from(r#"<div class="psub"><b>⟦nav-observatory⟧</b>"#);
     let _ = write!(
         x,
-        r#"<a href="index.html"{}>Overview</a>"#,
+        r#"<a href="index.html"{}>⟦overview⟧</a>"#,
         if here == "index.html" {
             r#" class="on""#
         } else {
@@ -1684,7 +1687,7 @@ pub fn made_by_work(data: &Data, fam: &[String], now: i64) -> String {
         .max_by_key(|r| s(r, "published"))
         .map(|r| {
             format!(
-                r#"<a class="chip" href="{}">latest release {} · {}</a>"#,
+                r#"<a class="chip" href="{}">⟦latest-release⟧ {} · {}</a>"#,
                 esc(&s(r, "link")),
                 esc(&s(r, "id")),
                 esc(&s(r, "published"))
@@ -1718,8 +1721,31 @@ pub fn made_by_work(data: &Data, fam: &[String], now: i64) -> String {
     }
     let work_line = esc(&crate::i18n::tn("commits-90", total));
     format!(
-        r#"<h2>Made by work</h2><div class="pathbox"><p class="work"><b>{work_line}</b> {release}</p><p class="work">{cis}</p>{svg}</div>"#
+        r#"<h2>⟦made-by-work⟧</h2><div class="pathbox"><p class="work"><b>{work_line}</b> {release}</p><p class="work">{cis}</p>{svg}</div>"#
     )
+}
+
+/// Interface text is marked with its message id where it is written - ⟦message-id⟧ - and each page
+/// resolves its marks in its own language (messages from the Fluent catalogs, escaped).
+pub fn localize(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(i) = rest.find('⟦') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + '⟦'.len_utf8()..];
+        match after.find('⟧') {
+            Some(j) => {
+                out.push_str(&esc(&t(&after[..j])));
+                rest = &after[j + '⟧'.len_utf8()..];
+            }
+            None => {
+                out.push_str(&rest[i..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A unix time as "YYYY-MM-DD HH:MM UTC" (civil-from-days, no date library).
@@ -1829,11 +1855,11 @@ fn render_in(data: &Data, out: &Path) -> Result<()> {
         }
     }
     let status_legend = legend(&[
-        ("good", "works"),
-        ("part", "partly"),
-        ("bad", "missing or broken"),
-        ("none", "not known yet"),
-        ("na", "not applicable"),
+        ("good", "⟦works⟧"),
+        ("part", "⟦partly⟧"),
+        ("bad", "⟦missing-or-broken⟧"),
+        ("none", "⟦not-known-yet⟧"),
+        ("na", "⟦not-applicable⟧"),
     ]);
     for g in &grands {
         let dir = out.join(&g.slug);
@@ -2195,12 +2221,12 @@ mod tests {
             ]
         );
         assert!(
-            pages[0].2.contains("<b>1 of 1</b><span>milestones done"),
+            pages[0].2.contains("<b>1 of 1</b><span>⟦milestones-done⟧"),
             "its milestone is done by its backlog"
         );
         assert!(pages[0]
             .2
-            .contains(r#"<a href="project-tad.html" class="on">How close we are</a>"#));
+            .contains(r#"<a href="project-tad.html" class="on">⟦view-how-close⟧</a>"#));
     }
 
     #[test]
@@ -2216,7 +2242,7 @@ mod tests {
             w.contains("<b>7 commits in the last 90 days</b>"),
             "only the last 90 days count"
         );
-        assert!(w.contains("latest release v1 · 2026-11-01"));
+        assert!(w.contains("⟦latest-release⟧ v1 · 2026-11-01"));
         assert!(w.contains(r#"class="chip ci bad""#) && w.contains("✕ CI"));
         assert_eq!(w.matches("<rect").count(), 90);
         assert!(
@@ -2252,5 +2278,20 @@ mod tests {
         crate::i18n::set("en");
         assert!(redirect("../en/linux-phones/index.html")
             .contains(r#"url=../en/linux-phones/index.html"#));
+    }
+
+    #[test]
+    fn marks_resolve_in_the_page_language() {
+        crate::i18n::set("ru");
+        assert_eq!(
+            localize("<h2>⟦grand-projects⟧</h2><p>⟦no-such⟧</p>"),
+            "<h2>Большие проекты</h2><p>no-such</p>"
+        );
+        crate::i18n::set("en");
+        assert_eq!(
+            localize("<b>⟦rejected⟧</b> plain ⟦"),
+            "<b>Rejected:</b> plain ⟦",
+            "an unclosed mark stays as written"
+        );
     }
 }
