@@ -11,3 +11,4 @@
 {"id":"engine-path","title":"The path","status":"done","note":"Three horizons, milestones filled by evidence, readiness earned in order.","opened":"2026-11-10"}
 {"id":"engine-project-pages","title":"A page per project","status":"done","note":"How close it is, its backlog, log and ideas; cards on the overview.","opened":"2026-11-10"}
 {"id":"engine-site","title":"The site","status":"done","note":"The observatory and its family, how we work, ranked tables with a sign in every cell; one stylesheet, inline SVG, no JavaScript.","opened":"2026-11-10"}
+{"id":"engine-words-by-the-browser","title":"Words never overlap","status":"done","note":"The path redrawn as page layout: a cell per stop, labels whole and wrapping inside their cell, the ladder likewise; a test forbids words inside SVG.","opened":"2026-11-10"}
