@@ -2,9 +2,9 @@
 schema = 1
 
 [project]
-id = "open-commons-observatory/oco"
-name = "The observatory's engine: the mark, discovery, the harvest, the site"
-title = "Engine"
+id = "open-commons-observatory/ocoeco-engine"
+name = "ocoeco-engine: draws the observatory from ocoeco's data - its lenses, in every language"
+title = "ocoeco-engine"
 kind = "tool"
 order = 3
 parent = "open-commons-observatory"

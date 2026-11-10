@@ -1,6 +1,6 @@
-# oco
+# ocoeco-engine
 
-The face of the [Open Commons Observatory](https://open-commons-observatory.github.io/): its website,
+ocoeco's rendering engine - the face of the [Open Commons Observatory](https://open-commons-observatory.github.io/): its website,
 rendered from the data that [ocoeco](https://github.com/open-commons-observatory/ocoeco) - the
 observatory's information ecosystem - gathers.
 
