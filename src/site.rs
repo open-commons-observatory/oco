@@ -101,7 +101,7 @@ fn sign(t: &str) -> &'static str {
         "part" => "◐",
         "bad" => "✕",
         "na" => "–",
-        _ => "·",
+        _ => "?",
     }
 }
 
@@ -164,6 +164,14 @@ impl Data {
                     .filter(|x| !x.is_empty())
                     .unwrap_or_else(|| name.split(':').next().unwrap_or(&name).trim().to_string());
                 r.insert("slug".into(), Value::String(slug(&title)));
+            }
+        }
+        // a group's key is its source category, whatever language its name is shown in
+        for rows in tables.values_mut() {
+            for r in rows.iter_mut() {
+                if let Some(c) = r.get("category").and_then(Value::as_str).map(String::from) {
+                    r.insert("category_key".into(), Value::String(c));
+                }
             }
         }
         for t in self
@@ -299,24 +307,39 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
             format!(r#"<p class="lead">{}</p>"#, esc(&lead))
         }
     );
-    let label = {
-        let r = k("rows");
-        let mut c = r.chars();
-        c.next()
-            .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
-            .unwrap_or_default()
-    };
+    let label = Some(k("row_title"))
+        .filter(|x| !x.is_empty())
+        .unwrap_or_else(|| k("rows"));
     match k("kind").as_str() {
         "path" => how_close(data, g, fam),
         "matrix" => {
             let rows = of(data, &k("table"), fam);
             let cells = cells_of(&rows, &k("row_key"), &k("column_key"));
-            let lines = lines_from(
+            let mut lines = lines_from(
                 data,
                 &k("rows"),
                 |id| cells.keys().any(|(r, _)| r == id),
                 "why",
             );
+            let order: Vec<&str> = v["groups"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            if !order.is_empty() {
+                let key: BTreeMap<String, String> = data
+                    .rows(&k("rows"))
+                    .iter()
+                    .map(|r| (s(r, "id"), first(r, &["category_key", "category"])))
+                    .collect();
+                lines.sort_by_key(|l| {
+                    order
+                        .iter()
+                        .position(|g| key.get(&l.id).is_some_and(|c| c == g))
+                        .unwrap_or(usize::MAX)
+                });
+            }
             let ids: Vec<String> = lines.iter().map(|l| l.id.clone()).collect();
             let cols = ranked(
                 &cells,
@@ -1407,11 +1430,11 @@ fn path_section(data: &Data, title: &str, ms: &[Milestone]) -> String {
             .unwrap_or("");
         let _ = write!(
             b,
-            r#"<div class="card" id="{}"><h4>{}</h4><span class="chip">{h}</span><span class="chip">readiness {}</span><span class="chip">{}</span><p>{}</p><p class="signs">{signs}</p></div>"#,
+            r#"<div class="card" id="{}"><h4>{}</h4><span class="chip">{h}</span><span class="chip">⟦readiness-chip⟧ {}</span><span class="chip">⟦state-{}⟧</span><p>{}</p><p class="signs">{signs}</p></div>"#,
             esc(&m.id),
             esc(&m.title),
             m.readiness,
-            e.state(),
+            e.state().replace(' ', "-"),
             esc(&m.why)
         );
     }
@@ -2117,7 +2140,7 @@ mod tests {
         assert!(t.contains(r#"<tr class="group"><th colspan="3">phone</th></tr>"#));
         assert!(t.contains(r#"<td class="s good" title="Calls on iOS: works">✓</td>"#));
         assert!(
-            t.contains(r#"title="Calls on X: unknown">·</td>"#),
+            t.contains(r#"title="Calls on X: unknown">?</td>"#),
             "no cell is left blank"
         );
         assert!(t.contains("<small>100%</small>"));
@@ -2441,6 +2464,29 @@ mod tests {
             h.matches(r#"class="stopcell"#).count(),
             2,
             "each stop a cell of its own"
+        );
+    }
+
+    #[test]
+    fn a_lens_names_its_rows_and_orders_its_groups_in_every_language() {
+        let d = data(&[
+            ("lenses", r#"{"id":"o/lens","project":"o/lens","lens":{"lens":{"title":"P"},"family":{"owners":["o"]},"view":[{"id":"features","title":"Features","kind":"matrix","table":"feature_support","rows":"features","row_title":"Feature","row_key":"feature_id","columns":"platforms","column_key":"platform_id","groups":["calls","power"]}]}}"#),
+            ("projects", "{\"id\":\"o/docs\"}"),
+            ("features", "{\"id\":\"battery\",\"name\":\"Battery\",\"category\":\"power\",\"project\":\"o/docs\"}\n{\"id\":\"voice\",\"name\":\"Voice\",\"category\":\"calls\",\"project\":\"o/docs\"}"),
+            ("platforms", r#"{"id":"ios","name":"iOS"}"#),
+            ("feature_support", "{\"feature_id\":\"battery\",\"platform_id\":\"ios\",\"status\":\"works\",\"project\":\"o/docs\"}\n{\"feature_id\":\"voice\",\"platform_id\":\"ios\",\"status\":\"works\",\"project\":\"o/docs\"}"),
+            ("translations", "{\"table\":\"features\",\"row\":\"voice\",\"column\":\"category\",\"lang\":\"ru\",\"text\":\"звонки\",\"project\":\"o/docs\"}"),
+        ]);
+        let ru = d.localized("ru");
+        let g = grands(&ru);
+        let v = lens_view(&ru, &g[0], &family(&ru, &g[0]), &g[0].lens["view"][0], "");
+        assert!(
+            v.contains(r#"<th class="first">Feature</th>"#),
+            "the lens names its rows"
+        );
+        assert!(
+            v.find("звонки").unwrap() < v.find("power").unwrap(),
+            "the lens's order holds, though the category is shown translated"
         );
     }
 }
