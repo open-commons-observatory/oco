@@ -123,44 +123,183 @@ pub struct Grand {
     pub goal: String,
     pub slug: String,
     pub owner: String,
+    /// the family: every project of these owners, and these projects by id
+    pub owners: Vec<String>,
+    pub members: Vec<String>,
+    /// in the observatory's navigation, at this place
+    pub curated: bool,
+    pub order: i64,
+    /// its views: (file, title)
+    pub views: Vec<(String, String)>,
+    /// the lens as declared
+    pub lens: Value,
 }
 
 /// The grand projects, from the registry: the title is the mark's `title`, or its name before a colon.
 pub fn grands(data: &Data) -> Vec<Grand> {
-    data.rows("projects")
+    // grand views come from lenses: curated ones first, in the observatory's order
+    let curated: BTreeMap<String, i64> = data
+        .rows("curated")
         .iter()
-        .filter(|p| s(p, "kind") == "picture")
-        .map(|p| {
-            let name = s(p, "name");
-            let (before, after) = name
-                .split_once(':')
-                .map(|(a, b)| (a.trim().to_string(), b.trim().to_string()))
-                .unwrap_or((name.clone(), String::new()));
-            let title = Some(s(p, "title"))
-                .filter(|t| !t.is_empty())
-                .unwrap_or(before);
-            let id = s(p, "id");
+        .map(|r| (s(r, "id"), n(r, "order")))
+        .collect();
+    let strs = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect()
+    };
+    let mut out: Vec<Grand> = data
+        .rows("lenses")
+        .iter()
+        .map(|r| {
+            let l = r.get("lens").cloned().unwrap_or(Value::Null);
+            let id = s(r, "id");
+            let title = l["lens"]["title"].as_str().unwrap_or(&id).to_string();
+            let views = l["view"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|v| {
+                    (
+                        format!("{}.html", v["id"].as_str().unwrap_or("view")),
+                        v["title"].as_str().unwrap_or("").to_string(),
+                    )
+                })
+                .collect();
             Grand {
                 slug: slug(&title),
                 owner: id.split('/').next().unwrap_or_default().to_string(),
-                goal: after,
+                goal: l["lens"]["goal"].as_str().unwrap_or("").to_string(),
+                owners: strs(&l["family"]["owners"]),
+                members: strs(&l["family"]["projects"]),
+                curated: curated.contains_key(&id),
+                order: curated.get(&id).copied().unwrap_or(i64::MAX),
+                views,
+                lens: l,
                 title,
                 id,
             }
         })
-        .collect()
+        .collect();
+    out.sort_by_key(|g| (g.order, g.title.clone()));
+    out
 }
 
 /// The projects of a grand project's family: itself, and those whose parent is its owner or itself.
 fn family(data: &Data, g: &Grand) -> Vec<String> {
+    // as the lens declares it: every project of its owners, and the projects it names
     data.rows("projects")
         .iter()
-        .filter(|p| {
-            let par = s(p, "parent");
-            s(p, "id") == g.id || par == g.owner || par == g.id
-        })
         .map(|p| s(p, "id"))
+        .filter(|id| {
+            g.owners
+                .iter()
+                .any(|o| id.split('/').next() == Some(o.as_str()))
+                || g.members.contains(id)
+        })
         .collect()
+}
+
+/// One view of a lens, drawn by its kind with the parameters the lens gives.
+pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legend: &str) -> String {
+    let k = |key: &str| v[key].as_str().unwrap_or("").to_string();
+    let lead = k("lead");
+    let head = format!(
+        r#"<h1>{}</h1>{}"#,
+        esc(&k("title")),
+        if lead.is_empty() {
+            String::new()
+        } else {
+            format!(r#"<p class="lead">{}</p>"#, esc(&lead))
+        }
+    );
+    let label = {
+        let r = k("rows");
+        let mut c = r.chars();
+        c.next()
+            .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+            .unwrap_or_default()
+    };
+    match k("kind").as_str() {
+        "path" => how_close(data, g, fam),
+        "matrix" => {
+            let rows = of(data, &k("table"), fam);
+            let cells = cells_of(&rows, &k("row_key"), &k("column_key"));
+            let lines = lines_from(
+                data,
+                &k("rows"),
+                |id| cells.keys().any(|(r, _)| r == id),
+                "why",
+            );
+            let ids: Vec<String> = lines.iter().map(|l| l.id.clone()).collect();
+            let cols = ranked(
+                &cells,
+                &ids,
+                data.rows(&k("columns"))
+                    .iter()
+                    .map(|c| (s(c, "id"), s(c, "name"), s(c, "kind")))
+                    .filter(|(id, _, _)| cells.keys().any(|(_, c)| c == id))
+                    .collect(),
+            );
+            format!(
+                "{head}{status_legend}{}",
+                table(&label, &lines, &cols, &cells)
+            )
+        }
+        "families" => {
+            let support = of(data, &k("table"), fam);
+            let fcells = families(&support, data.rows(&k("columns")));
+            let lines = lines_from(
+                data,
+                &k("rows"),
+                |id| fcells.keys().any(|(r, _)| r == id),
+                "why",
+            );
+            let ids: Vec<String> = lines.iter().map(|l| l.id.clone()).collect();
+            let mut groups: Vec<(String, String, String)> = fcells
+                .keys()
+                .map(|(_, f)| (f.clone(), f.clone(), String::new()))
+                .collect();
+            groups.sort();
+            groups.dedup();
+            format!(
+                "{head}{status_legend}{}",
+                table(&label, &lines, &ranked(&fcells, &ids, groups), &fcells)
+            )
+        }
+        "runs" => format!(
+            r#"{head}{}<div class="scroll" style="padding:16px">{}</div>"#,
+            legend(&[("good", "passed"), ("bad", "failed"), ("none", "skipped")]),
+            runs_chart(&of(data, "test_runs", fam))
+        ),
+        "backlog" => backlog(&of(data, "backlog", fam)),
+        "cards" => {
+            let mut b = format!(r#"{head}<div class="cards" style="margin-top:28px">"#);
+            for r in of(data, &k("table"), fam) {
+                let note = s(r, &k("note_field"));
+                let _ = write!(
+                    b,
+                    r#"<div class="card"><h4><a href="{}">{}</a></h4><p>{}</p>{}</div>"#,
+                    esc(&s(r, &k("link_field"))),
+                    esc(&s(r, &k("title_field"))),
+                    esc(&s(r, &k("text_field"))),
+                    if note.is_empty() {
+                        String::new()
+                    } else {
+                        format!(r#"<p><b>For us:</b> {}</p>"#, esc(&note))
+                    }
+                );
+            }
+            b + "</div>"
+        }
+        "heartbeat" => format!("{head}{}", made_by_work(data, fam, now_secs())),
+        other => format!(
+            r#"{head}<p class="lead">The view kind "{}" is not drawn yet.</p>"#,
+            esc(other)
+        ),
+    }
 }
 
 fn of<'a>(data: &'a Data, table: &str, fam: &[String]) -> Vec<&'a Row> {
@@ -421,16 +560,6 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
-const VIEWS: [(&str, &str); 7] = [
-    ("index.html", "How close we are"),
-    ("features.html", "Features"),
-    ("devices.html", "Devices"),
-    ("families.html", "SoC families"),
-    ("tests.html", "Tests"),
-    ("backlog.html", "Backlog"),
-    ("landscape.html", "Landscape"),
-];
-
 struct Page<'a> {
     grands: &'a [Grand],
     generated: &'a str,
@@ -452,7 +581,7 @@ impl Page<'_> {
             here(""),
             here("how-we-work.html")
         );
-        for g in self.grands {
+        for g in self.grands.iter().filter(|g| g.curated) {
             let on = grand.is_some_and(|x| x.id == g.id);
             let _ = write!(
                 nav,
@@ -468,7 +597,7 @@ impl Page<'_> {
                     r#"<div class="sub"><div class="wrap"><b>{}</b>"#,
                     esc(&g.title)
                 );
-                for (f, t) in VIEWS {
+                for (f, t) in g.views.iter().map(|(a, b)| (a.as_str(), b.as_str())) {
                     let _ = write!(
                         x,
                         r#"<a href="{f}"{}>{t}</a>"#,
@@ -861,24 +990,6 @@ fn backlog(rows: &[&Row]) -> String {
             );
         }
         b.push_str("</div>");
-    }
-    b + "</div>"
-}
-
-fn landscape(rows: &[&Row]) -> String {
-    let mut b = String::from(
-        r#"<h1>Landscape</h1><p class="lead">The projects around ours - what each does, and how we build on it rather than beside it.</p><div class="cards" style="margin-top:32px">"#,
-    );
-    for r in rows {
-        let _ = write!(
-            b,
-            r#"<div class="card"><h4><a href="{}">{}</a></h4><span class="chip">{}</span><p>{}</p><p><b>For us:</b> {}</p></div>"#,
-            esc(&s(r, "link")),
-            esc(&s(r, "name")),
-            esc(&s(r, "project")),
-            esc(&s(r, "what")),
-            esc(&s(r, "for_us"))
-        );
     }
     b + "</div>"
 }
@@ -1644,86 +1755,13 @@ pub fn render(data: &Data, out: &Path) -> Result<()> {
         let dir = out.join(&g.slug);
         std::fs::create_dir_all(&dir)?;
         let fam = family(data, g);
-        let (lines, cols, cells) = feature_view(data, &fam);
-        let support = of(data, "support_status", &fam);
-        let dcells = cells_of(&support, "component_id", "device_id");
-        let dlines = lines_from(
-            data,
-            "components",
-            |id| dcells.keys().any(|(r, _)| r == id),
-            "notes",
-        );
-        let dids: Vec<String> = dlines.iter().map(|l| l.id.clone()).collect();
-        let dcols = ranked(
-            &dcells,
-            &dids,
-            data.rows("devices")
-                .iter()
-                .map(|d| (s(d, "id"), s(d, "name"), String::new()))
-                .filter(|(id, _, _)| dcells.keys().any(|(_, c)| c == id))
-                .collect(),
-        );
-        let fcells = families(&support, data.rows("devices"));
-        let fcols = ranked(&fcells, &dids, {
-            let mut v: Vec<(String, String, String)> = fcells
-                .keys()
-                .map(|(_, f)| (f.clone(), f.clone(), String::new()))
-                .collect();
-            v.dedup();
-            v.sort();
-            v.dedup();
-            v
-        });
-        let pages = [
-            ("index.html", "How close we are", how_close(data, g, &fam)),
-            (
-                "features.html",
-                "Features",
-                format!(
-                    r#"<h1>Features</h1><p class="lead">What a phone does, against every candidate - best first, ranked by what works. Hover a cell for its source.</p>{status_legend}{}"#,
-                    table("Feature", &lines, &cols, &cells)
-                ),
-            ),
-            (
-                "devices.html",
-                "Devices",
-                format!(
-                    r#"<h1>Devices</h1><p class="lead">What works on each phone, part by part - from its lab's tests and records.</p>{status_legend}{}"#,
-                    table("Component", &dlines, &dcols, &dcells)
-                ),
-            ),
-            (
-                "families.html",
-                "SoC families",
-                format!(
-                    r#"<h1>SoC families</h1><p class="lead">Support by chip family: for each part, the best any device of the family reaches - what a new phone on the same chip can start from.</p>{status_legend}{}"#,
-                    table("Component", &dlines, &fcols, &fcells)
-                ),
-            ),
-            (
-                "tests.html",
-                "Tests",
-                format!(
-                    r#"<h1>Tests</h1><p class="lead">Every automatic test run on a device: passed, failed and skipped checks, oldest first.</p>{}<div class="scroll" style="padding:16px">{}</div>"#,
-                    legend(&[("good", "passed"), ("bad", "failed"), ("none", "skipped")]),
-                    runs_chart(&of(data, "test_runs", &fam))
-                ),
-            ),
-            (
-                "backlog.html",
-                "Backlog",
-                backlog(&of(data, "backlog", &fam)),
-            ),
-            (
-                "landscape.html",
-                "Landscape",
-                landscape(&of(data, "landscape", &fam)),
-            ),
-        ];
-        for (file, title, body) in pages {
+        for v in g.lens["view"].as_array().into_iter().flatten() {
+            let file = format!("{}.html", v["id"].as_str().unwrap_or("view"));
+            let title = v["title"].as_str().unwrap_or("").to_string();
+            let body = lens_view(data, g, &fam, v, &status_legend);
             std::fs::write(
-                dir.join(file),
-                page.render(Some(g), file, &format!("{title} · {}", g.title), &body),
+                dir.join(&file),
+                page.render(Some(g), &file, &format!("{title} · {}", g.title), &body),
             )?;
         }
     }
@@ -1772,28 +1810,46 @@ mod tests {
     }
 
     #[test]
-    fn grand_projects_come_from_the_registry() {
-        let d = data(&[("projects", "{\"id\":\"linux-phone-oco/docs\",\"name\":\"Linux phones: as good as Android\",\"kind\":\"picture\",\"parent\":\"open-commons-observatory\",\"title\":\"Linux Phones\"}\n{\"id\":\"a/tool\",\"name\":\"t\",\"kind\":\"tool\",\"parent\":\"linux-phone-oco\"}")]);
-        let g = grands(&d);
-        assert_eq!(g.len(), 1, "only pictures are grand projects");
-        assert_eq!(
+    fn grand_views_come_from_lenses() {
+        let d = data(&[
             (
-                g[0].title.as_str(),
-                g[0].slug.as_str(),
-                g[0].goal.as_str(),
-                g[0].owner.as_str()
+                "lenses",
+                r#"{"id":"o/lens","project":"o/lens","lens":{"lens":{"title":"Linux Phones","goal":"as good"},"family":{"owners":["o"]},"view":[{"id":"index","title":"How close","kind":"path"},{"id":"features","title":"Features","kind":"matrix","table":"feature_support","rows":"features","row_key":"feature_id","columns":"platforms","column_key":"platform_id"}]}}"#,
             ),
+            ("curated", r#"{"id":"o/lens","order":1}"#),
+            ("projects", "{\"id\":\"o/docs\"}\n{\"id\":\"x/other\"}"),
             (
-                "Linux Phones",
-                "linux-phones",
-                "as good as Android",
-                "linux-phone-oco"
-            )
+                "features",
+                r#"{"id":"calls","name":"Calls","category":"phone"}"#,
+            ),
+            ("platforms", r#"{"id":"ios","name":"iOS"}"#),
+            (
+                "feature_support",
+                r#"{"feature_id":"calls","platform_id":"ios","status":"works","project":"o/docs"}"#,
+            ),
+        ]);
+        let g = grands(&d);
+        assert_eq!(
+            (g[0].title.as_str(), g[0].slug.as_str(), g[0].curated),
+            ("Linux Phones", "linux-phones", true)
         );
         assert_eq!(
-            family(&d, &g[0]).len(),
-            2,
-            "its own repo and those under its owner"
+            g[0].views,
+            vec![
+                ("index.html".to_string(), "How close".to_string()),
+                ("features.html".to_string(), "Features".to_string())
+            ]
+        );
+        let fam = family(&d, &g[0]);
+        assert_eq!(
+            fam,
+            vec!["o/docs".to_string()],
+            "the lens's owners, not other projects"
+        );
+        let v = lens_view(&d, &g[0], &fam, &g[0].lens["view"][1], "");
+        assert!(
+            v.contains(r#"<td class="s good" title="Calls on iOS: works">✓</td>"#),
+            "a matrix drawn from the lens's parameters"
         );
     }
 
