@@ -413,6 +413,8 @@ svg.path .frac{font-size:10.5px;text-anchor:middle;fill:var(--fg);font-weight:70
 svg.path .lvl{fill:var(--soft);stroke:var(--line)}svg.path .lvl.on{fill:var(--accent);stroke:var(--accent)}
 .signs{display:flex;flex-wrap:wrap;gap:3px}.mini{display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:4px;font-size:11px;font-weight:700;color:#fff}
 .mini.good{background:var(--good)}.mini.part{background:var(--part)}.mini.bad{background:var(--bad)}.mini.none{background:var(--soft);color:var(--mute)}.mini.na{background:var(--na);color:var(--mute)}
+.psub{display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:14.5px;padding:0 0 16px;margin-bottom:28px;border-bottom:1px solid var(--line)}
+.psub a{color:var(--mute)}.psub a.on{color:var(--fg);font-weight:600}.psub b{margin-right:6px}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -714,30 +716,26 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
     for g in grands {
         b.push_str(&grand_overview_card(data, g));
     }
-    // the other projects with a path of their own - the same view, below the grand projects
-    let others: Vec<&Row> = projects
-        .iter()
-        .filter(|p| {
-            s(p, "kind") != "picture"
-                && data
-                    .rows("milestones")
-                    .iter()
-                    .any(|m| s(m, "project") == s(p, "id"))
-        })
-        .collect();
+    // the other projects with a path of their own: a card each, linking to its pages
+    let others = subs(data);
     if !others.is_empty() {
         b.push_str(r#"<h2>Other projects on their way</h2>"#);
-        for p in others {
-            let rows: Vec<&Row> = data
-                .rows("milestones")
-                .iter()
-                .filter(|m| s(m, "project") == s(p, "id"))
-                .collect();
-            let name = s(p, "name");
-            let title = Some(s(p, "title"))
-                .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| name.split(':').next().unwrap_or(&name).trim().to_string());
-            b.push_str(&path_section(data, &title, &milestones_of(&rows)));
+        for p in &others {
+            let rated = rate(
+                data,
+                &milestones_of(&of(data, "milestones", std::slice::from_ref(&p.id))),
+            );
+            let done = rated.iter().filter(|(_, e)| e.state() == "done").count();
+            let _ = write!(
+                b,
+                r#"<a class="grand" href="{}.html"><h3>{}</h3><p>{}</p>{}<p>{done} of {} milestones done · readiness {} of 9</p></a>"#,
+                p.slug,
+                esc(&p.title),
+                esc(&p.goal),
+                path_svg(&rated),
+                rated.len(),
+                readiness(&rated)
+            );
         }
     }
     let ids: Vec<String> = projects.iter().map(|p| s(p, "id")).collect();
@@ -1280,6 +1278,160 @@ fn how_we_work(data: &Data) -> String {
     b
 }
 
+/// Milestones with the evidence each has.
+fn rate(data: &Data, ms: &[Milestone]) -> Vec<(Milestone, Evidence)> {
+    ms.iter()
+        .map(|m| {
+            let items: Vec<(String, String)> =
+                m.criteria.iter().flat_map(|c| evaluate(data, c)).collect();
+            (m.clone(), evidence(&items))
+        })
+        .collect()
+}
+
+/// A project with a path of its own: every marked project that exports milestones and is not a
+/// grand project (those have their tabs).
+pub struct Sub {
+    pub id: String,
+    pub title: String,
+    pub goal: String,
+    pub slug: String,
+    pub link: String,
+}
+
+pub fn subs(data: &Data) -> Vec<Sub> {
+    data.rows("projects")
+        .iter()
+        .filter(|p| {
+            s(p, "kind") != "picture"
+                && data
+                    .rows("milestones")
+                    .iter()
+                    .any(|m| s(m, "project") == s(p, "id"))
+        })
+        .map(|p| {
+            let name = s(p, "name");
+            let (before, after) = name
+                .split_once(':')
+                .map(|(a, b)| (a.trim().to_string(), b.trim().to_string()))
+                .unwrap_or((name.clone(), String::new()));
+            let title = Some(s(p, "title"))
+                .filter(|t| !t.is_empty())
+                .unwrap_or(before);
+            Sub {
+                slug: format!("project-{}", slug(&title)),
+                id: s(p, "id"),
+                goal: after,
+                title,
+                link: s(p, "link"),
+            }
+        })
+        .collect()
+}
+
+const SUB_VIEWS: [(&str, &str); 4] = [
+    ("", "How close we are"),
+    ("-backlog", "Backlog"),
+    ("-log", "Log"),
+    ("-ideas", "Ideas"),
+];
+
+fn sub_nav(p: &Sub, here: &str) -> String {
+    let mut x = format!(r#"<div class="psub"><b>{}</b>"#, esc(&p.title));
+    for (suffix, label) in SUB_VIEWS {
+        let _ = write!(
+            x,
+            r#"<a href="{}{suffix}.html"{}>{label}</a>"#,
+            p.slug,
+            if suffix == here { r#" class="on""# } else { "" }
+        );
+    }
+    let _ = write!(x, r#"<a href="{}">repository ↗</a></div>"#, esc(&p.link));
+    x
+}
+
+/// A project's own pages: how close it is (its path), its backlog, its log, its ideas.
+pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
+    let fam = vec![p.id.clone()];
+    let ms = milestones_of(&of(data, "milestones", &fam));
+    let rated = rate(data, &ms);
+    let done = rated.iter().filter(|(_, e)| e.state() == "done").count();
+    let back = of(data, "backlog", &fam);
+    let count = |st: &str| back.iter().filter(|r| s(r, "status") == st).count();
+    let mut how = format!(
+        r#"{}<h1>{}</h1><p class="lead">{}</p><div class="stats"><div class="stat"><b>{done} of {}</b><span>milestones done</span></div><div class="stat"><b>{}</b><span>readiness, of 9</span></div><div class="stat"><b>{}</b><span>in progress</span></div><div class="stat"><b>{}</b><span>open</span></div></div>"#,
+        sub_nav(p, ""),
+        esc(&p.title),
+        esc(&p.goal),
+        rated.len(),
+        readiness(&rated),
+        count("in-progress"),
+        count("open")
+    );
+    how.push_str(&path_section(data, "The path", &ms));
+    let mut logs = of(data, "session_log", &fam);
+    logs.sort_by_key(|r| std::cmp::Reverse(s(r, "entry_date")));
+    let mut log = format!(
+        r#"{}<h1>Log</h1><p class="lead">How the work went - what was done, considered and rejected.</p>"#,
+        sub_nav(p, "-log")
+    );
+    for r in logs {
+        let rejected = if s(r, "rejected").is_empty() {
+            String::new()
+        } else {
+            format!(r#"<p><b>Rejected:</b> {}</p>"#, esc(&s(r, "rejected")))
+        };
+        let _ = write!(
+            log,
+            r#"<div class="log"><time>{}</time><h4>{}</h4><p>{}</p>{rejected}</div>"#,
+            esc(&s(r, "entry_date")),
+            esc(&s(r, "title")),
+            esc(&s(r, "done"))
+        );
+    }
+    let mut ideas = format!(
+        r#"{}<h1>Ideas</h1><p class="lead">Its concepts, and the decisions taken - with what was rejected.</p><div class="cards">"#,
+        sub_nav(p, "-ideas")
+    );
+    for r in of(data, "concepts", &fam) {
+        let _ = write!(
+            ideas,
+            r#"<div class="card"><h4>{}</h4><p>{}</p></div>"#,
+            esc(&s(r, "name")),
+            esc(&first(r, &["summary", "statement", "description"]))
+        );
+    }
+    for r in of(data, "decisions", &fam) {
+        let _ = write!(
+            ideas,
+            r#"<div class="card"><h4>{}</h4><p>{}</p><p><b>Rejected:</b> {}</p><p><span class="chip">{}</span></p></div>"#,
+            esc(&s(r, "decision")),
+            esc(&s(r, "why")),
+            esc(&s(r, "rejected")),
+            esc(&s(r, "date"))
+        );
+    }
+    ideas.push_str("</div>");
+    vec![
+        (format!("{}.html", p.slug), p.title.clone(), how),
+        (
+            format!("{}-backlog.html", p.slug),
+            format!("Backlog · {}", p.title),
+            format!("{}{}", sub_nav(p, "-backlog"), backlog(&back)),
+        ),
+        (
+            format!("{}-log.html", p.slug),
+            format!("Log · {}", p.title),
+            log,
+        ),
+        (
+            format!("{}-ideas.html", p.slug),
+            format!("Ideas · {}", p.title),
+            ideas,
+        ),
+    ]
+}
+
 /// A unix time as "YYYY-MM-DD HH:MM UTC" (civil-from-days, no date library).
 pub fn utc(secs: i64) -> String {
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
@@ -1320,6 +1472,11 @@ pub fn render(data: &Data, out: &Path) -> Result<()> {
         out.join("how-we-work.html"),
         page.render(None, "how-we-work.html", "How we work", &how_we_work(data)),
     )?;
+    for p in subs(data) {
+        for (file, title, body) in sub_pages(data, &p) {
+            std::fs::write(out.join(&file), page.render(None, &file, &title, &body))?;
+        }
+    }
     let status_legend = legend(&[
         ("good", "works"),
         ("part", "partly"),
@@ -1712,5 +1869,41 @@ mod tests {
             readiness(&[(m("a", "working", 5), open), (m("c", "ongoing", 8), done)]),
             0
         );
+    }
+
+    #[test]
+    fn every_project_with_milestones_gets_its_pages() {
+        let d = data(&[
+            ("projects", "{\"id\":\"o/tad\",\"name\":\"tad: text as data\",\"kind\":\"tool\",\"parent\":\"x\",\"link\":\"https://x\"}\n{\"id\":\"o/docs\",\"name\":\"Phones: big\",\"kind\":\"picture\",\"parent\":\"x\"}\n{\"id\":\"o/none\",\"name\":\"no path\",\"kind\":\"tool\",\"parent\":\"x\"}"),
+            ("milestones", "{\"id\":\"m\",\"subject\":\"tad\",\"ord\":1,\"title\":\"Works\",\"horizon\":\"working\",\"readiness\":6,\"criteria\":\"backlog:b\",\"why\":\"\",\"project\":\"o/tad\"}\n{\"id\":\"g\",\"subject\":\"phones\",\"ord\":1,\"title\":\"G\",\"horizon\":\"working\",\"readiness\":6,\"criteria\":\"\",\"why\":\"\",\"project\":\"o/docs\"}"),
+            ("backlog", "{\"id\":\"b\",\"title\":\"B\",\"status\":\"done\",\"project\":\"o/tad\"}"),
+        ]);
+        let subs = subs(&d);
+        assert_eq!(subs.len(), 1, "only a non-grand project with milestones");
+        assert_eq!(
+            (
+                subs[0].title.as_str(),
+                subs[0].slug.as_str(),
+                subs[0].goal.as_str()
+            ),
+            ("tad", "project-tad", "text as data")
+        );
+        let pages = sub_pages(&d, &subs[0]);
+        assert_eq!(
+            pages.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),
+            [
+                "project-tad.html",
+                "project-tad-backlog.html",
+                "project-tad-log.html",
+                "project-tad-ideas.html"
+            ]
+        );
+        assert!(
+            pages[0].2.contains("<b>1 of 1</b><span>milestones done"),
+            "its milestone is done by its backlog"
+        );
+        assert!(pages[0]
+            .2
+            .contains(r#"<a href="project-tad.html" class="on">How close we are</a>"#));
     }
 }
