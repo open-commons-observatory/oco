@@ -83,3 +83,4 @@ essence-now = What is happening now
 nothing-delivers = Nothing delivers this step yet.
 no-path-yet = It has not set its path yet.
 nothing-yet = Nothing gathered yet.
+delivery-untold = Reached - but what delivers it has not been written down.

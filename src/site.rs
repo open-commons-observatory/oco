@@ -2136,7 +2136,12 @@ pub fn essence_html(
         );
         let by: Vec<&&Row> = workings.iter().filter(|w| s(w, "serves") == m.id).collect();
         if by.is_empty() {
-            b.push_str(r#"<p class="mute">⟦nothing-delivers⟧</p>"#);
+            // two kinds of gap: a step reached whose delivery nobody wrote down, and a step nothing serves
+            b.push_str(if e.state() == "done" {
+                r#"<p class="mute">⟦delivery-untold⟧</p>"#
+            } else {
+                r#"<p class="mute">⟦nothing-delivers⟧</p>"#
+            });
         }
         for w in by {
             let uses = s(w, "uses");
@@ -2979,6 +2984,33 @@ mod tests {
         assert!(
             e.contains(r#"<span class="tell on">✓ ⟦essence-why⟧</span>"#)
                 && e.contains("Spread it")
+        );
+    }
+
+    #[test]
+    fn a_step_reached_with_no_workings_is_untold_not_a_wish() {
+        let d = data(&[
+            ("milestones", "{\"id\":\"m1\",\"subject\":\"p\",\"ord\":1,\"title\":\"Reached\",\"horizon\":\"working\",\"readiness\":3,\"criteria\":\"backlog:a\",\"why\":\"\",\"project\":\"o/p\"}\n{\"id\":\"m2\",\"subject\":\"p\",\"ord\":2,\"title\":\"Ahead\",\"horizon\":\"working\",\"readiness\":5,\"criteria\":\"backlog:b\",\"why\":\"\",\"project\":\"o/p\"}"),
+            ("backlog", "{\"id\":\"a\",\"status\":\"done\",\"project\":\"o/p\"}\n{\"id\":\"b\",\"status\":\"open\",\"project\":\"o/p\"}"),
+        ]);
+        let fam = vec!["o/p".to_string()];
+        let e = essence_html(
+            &d,
+            &fam,
+            "o/p",
+            &milestones_of(&of(&d, "milestones", &fam)),
+            "P",
+            "",
+        );
+        assert_eq!(
+            e.matches("delivery-untold").count(),
+            1,
+            "reached, but how was never written"
+        );
+        assert_eq!(
+            e.matches("nothing-delivers").count(),
+            1,
+            "not reached, and nothing serves it"
         );
     }
 }
