@@ -415,6 +415,9 @@ svg.path .lvl{fill:var(--soft);stroke:var(--line)}svg.path .lvl.on{fill:var(--ac
 .mini.good{background:var(--good)}.mini.part{background:var(--part)}.mini.bad{background:var(--bad)}.mini.none{background:var(--soft);color:var(--mute)}.mini.na{background:var(--na);color:var(--mute)}
 .psub{display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:14.5px;padding:0 0 16px;margin-bottom:28px;border-bottom:1px solid var(--line)}
 .psub a{color:var(--mute)}.psub a.on{color:var(--fg);font-weight:600}.psub b{margin-right:6px}
+svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.spark .idle{fill:var(--line)}
+.work{margin:6px 8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}.work b{font-size:22px}
+.chip.ci.good{color:var(--good);border-color:var(--good)}.chip.ci.bad{color:var(--bad);border-color:var(--bad)}.chip.ci.part{color:var(--part);border-color:var(--part)}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -551,6 +554,7 @@ fn how_close(data: &Data, g: &Grand, fam: &[String]) -> String {
     let mine: Vec<Milestone> = ms.iter().filter(|m| m.subject == g.slug).cloned().collect();
     if !mine.is_empty() {
         b.push_str(&path_section(data, "The path", &mine));
+        b.push_str(&made_by_work(data, fam, now_secs()));
     }
     if let Some(l) = cols.iter().find(|c| c.kind == "linux") {
         let [w, p, m, u] = tally(&cells, &ids, &l.id);
@@ -1386,6 +1390,7 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
         count("open")
     );
     how.push_str(&path_section(data, "The path", &ms));
+    how.push_str(&made_by_work(data, &fam, now_secs()));
     let mut logs = of(data, "session_log", &fam);
     logs.sort_by_key(|r| std::cmp::Reverse(s(r, "entry_date")));
     let mut log = format!(
@@ -1477,6 +1482,96 @@ fn family_bar(data: &Data, here: &str) -> String {
         );
     }
     x + "</div>"
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// What the work itself says, gathered by ocoeco: commits per day over 90 days, the latest
+/// release, the state of each CI workflow. Empty when nothing was gathered.
+pub fn made_by_work(data: &Data, fam: &[String], now: i64) -> String {
+    let act = of(data, "activity", fam);
+    let rel = of(data, "releases", fam);
+    let runs = of(data, "ci", fam);
+    if act.is_empty() && rel.is_empty() && runs.is_empty() {
+        return String::new();
+    }
+    let days: Vec<String> = (0..90)
+        .rev()
+        .map(|k| utc(now - k * 86_400)[..10].to_string())
+        .collect();
+    let mut per: BTreeMap<String, i64> = BTreeMap::new();
+    for r in &act {
+        *per.entry(s(r, "id")).or_default() += n(r, "commits");
+    }
+    let counts: Vec<i64> = days
+        .iter()
+        .map(|d| per.get(d).copied().unwrap_or(0))
+        .collect();
+    let total: i64 = counts.iter().sum();
+    let max = counts.iter().copied().max().unwrap_or(0).max(1);
+    let mut svg = String::from(
+        r#"<svg class="spark" viewBox="0 0 900 60" width="100%" role="img" aria-label="commits per day">"#,
+    );
+    for (i, (d, c)) in days.iter().zip(&counts).enumerate() {
+        let h = if *c == 0 {
+            2.0
+        } else {
+            4.0 + 52.0 * *c as f64 / max as f64
+        };
+        let _ = write!(
+            svg,
+            r#"<rect x="{:.1}" y="{:.1}" width="7" height="{h:.1}" rx="2" class="{}"><title>{d}: {c} commits</title></rect>"#,
+            i as f64 * 10.0,
+            58.0 - h,
+            if *c == 0 { "idle" } else { "busy" }
+        );
+    }
+    svg.push_str("</svg>");
+    let release = rel
+        .iter()
+        .max_by_key(|r| s(r, "published"))
+        .map(|r| {
+            format!(
+                r#"<a class="chip" href="{}">latest release {} · {}</a>"#,
+                esc(&s(r, "link")),
+                esc(&s(r, "id")),
+                esc(&s(r, "published"))
+            )
+        })
+        .unwrap_or_default();
+    let mut cis = String::new();
+    for r in &runs {
+        let c = s(r, "conclusion");
+        let t = match c.as_str() {
+            "success" => "good",
+            "failure" | "cancelled" | "timed_out" | "startup_failure" => "bad",
+            "in_progress" | "queued" | "waiting" => "part",
+            _ => "none",
+        };
+        let short = s(r, "project");
+        let short = short.rsplit('/').next().unwrap_or("");
+        let label = if fam.len() > 1 {
+            format!("{short}: {}", s(r, "id"))
+        } else {
+            s(r, "id")
+        };
+        let _ = write!(
+            cis,
+            r#"<a class="chip ci {t}" href="{}" title="{}: {c}">{} {}</a>"#,
+            esc(&s(r, "link")),
+            esc(&label),
+            sign(t),
+            esc(&label)
+        );
+    }
+    format!(
+        r#"<h2>Made by work</h2><div class="pathbox"><p class="work"><b>{total}</b> commits in the last 90 days {release}</p><p class="work">{cis}</p>{svg}</div>"#
+    )
 }
 
 /// A unix time as "YYYY-MM-DD HH:MM UTC" (civil-from-days, no date library).
@@ -1966,5 +2061,27 @@ mod tests {
         assert!(pages[0]
             .2
             .contains(r#"<a href="project-tad.html" class="on">How close we are</a>"#));
+    }
+
+    #[test]
+    fn the_work_speaks_for_itself() {
+        let now = 1_794_322_311; // 2026-11-10
+        let d = data(&[
+            ("activity", "{\"id\":\"2026-11-10\",\"commits\":5,\"project\":\"o/p\"}\n{\"id\":\"2026-11-09\",\"commits\":2,\"project\":\"o/p\"}\n{\"id\":\"2025-01-01\",\"commits\":9,\"project\":\"o/p\"}"),
+            ("releases", "{\"id\":\"v1\",\"published\":\"2026-11-01\",\"link\":\"https://r\",\"project\":\"o/p\"}"),
+            ("ci", "{\"id\":\"CI\",\"conclusion\":\"failure\",\"link\":\"https://c\",\"project\":\"o/p\"}"),
+        ]);
+        let w = made_by_work(&d, &["o/p".to_string()], now);
+        assert!(
+            w.contains("<b>7</b> commits in the last 90 days"),
+            "only the last 90 days count"
+        );
+        assert!(w.contains("latest release v1 · 2026-11-01"));
+        assert!(w.contains(r#"class="chip ci bad""#) && w.contains("✕ CI"));
+        assert_eq!(w.matches("<rect").count(), 90);
+        assert!(
+            made_by_work(&d, &["o/none".to_string()], now).is_empty(),
+            "nothing gathered, nothing shown"
+        );
     }
 }
