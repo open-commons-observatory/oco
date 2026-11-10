@@ -5,14 +5,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const KINDS: [&str; 6] = [
-    "observatory",
-    "picture",
-    "conveyor",
-    "device-lab",
-    "tool",
-    "research",
-];
+pub const KINDS: [&str; 5] = ["picture", "conveyor", "device-lab", "tool", "research"];
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Mark {
@@ -73,9 +66,5 @@ mod tests {
         assert!(Mark::parse(&DOCS.replace("schema = 1", "schema = 2")).is_err());
         assert!(Mark::parse(&DOCS.replace("\"picture\"", "\"blog\"")).is_err());
         assert!(Mark::parse(&DOCS.replace("linux-phone-oco/docs", "docs")).is_err());
-        assert!(
-            Mark::parse(&DOCS.replace("\"picture\"", "\"observatory\"")).is_ok(),
-            "the observatory marks itself"
-        );
     }
 }

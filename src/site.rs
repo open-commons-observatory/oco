@@ -404,6 +404,15 @@ table.grid{border-collapse:collapse;width:100%;font-size:14.5px}
 .stack .good{background:var(--good)}.stack .part{background:var(--part)}.stack .bad{background:var(--bad)}.stack .none{background:var(--none)}.bar b{text-align:right;font-weight:600}
 .board{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}@media(max-width:820px){.board{grid-template-columns:1fr}.bar{grid-template-columns:120px 1fr 48px}}
 .col .card{margin-bottom:12px}
+.pathbox{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 10px}
+svg.path .band{fill:var(--soft)}svg.path .hlabel{font-size:13px;fill:var(--mute);font-weight:600;letter-spacing:.04em}
+svg.path .road{stroke:var(--line);stroke-width:6;stroke-linecap:round}svg.path .travelled{stroke:var(--good);stroke-width:6;stroke-linecap:round}
+svg.path .stop{fill:var(--card);stroke:var(--line);stroke-width:5}svg.path .ring{fill:none;stroke-width:5;stroke-linecap:round}
+svg.path .ring.good{stroke:var(--good)}svg.path .ring.part{stroke:var(--part)}svg.path .ring.bad{stroke:var(--bad)}svg.path .ring.none{stroke:var(--none)}
+svg.path .frac{font-size:10.5px;text-anchor:middle;fill:var(--fg);font-weight:700}svg.path .stitle{font-size:12.5px;text-anchor:middle;fill:var(--fg)}
+svg.path .lvl{fill:var(--soft);stroke:var(--line)}svg.path .lvl.on{fill:var(--accent);stroke:var(--accent)}
+.signs{display:flex;flex-wrap:wrap;gap:3px}.mini{display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:4px;font-size:11px;font-weight:700;color:#fff}
+.mini.good{background:var(--good)}.mini.part{background:var(--part)}.mini.bad{background:var(--bad)}.mini.none{background:var(--soft);color:var(--mute)}.mini.na{background:var(--na);color:var(--mute)}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -532,6 +541,11 @@ fn how_close(data: &Data, g: &Grand, fam: &[String]) -> String {
             &g.goal
         })
     );
+    let ms = milestones_of(&of(data, "milestones", fam));
+    let mine: Vec<Milestone> = ms.iter().filter(|m| m.subject == g.slug).cloned().collect();
+    if !mine.is_empty() {
+        b.push_str(&path_section(data, "The path", &mine));
+    }
     if let Some(l) = cols.iter().find(|c| c.kind == "linux") {
         let [w, p, m, u] = tally(&cells, &ids, &l.id);
         let _ = write!(
@@ -615,7 +629,30 @@ fn how_close(data: &Data, g: &Grand, fam: &[String]) -> String {
             about: format!("{} features", in_g.len()),
         });
     }
-    b + &table("Area", &area_lines, &cols, &area_cells)
+    b.push_str(&table("Area", &area_lines, &cols, &area_cells));
+    let names: BTreeMap<String, String> = data
+        .rows("devices")
+        .iter()
+        .map(|d| (s(d, "id"), s(d, "name")))
+        .collect();
+    let mut subjects: Vec<String> = ms
+        .iter()
+        .map(|m| m.subject.clone())
+        .filter(|x| *x != g.slug)
+        .collect();
+    subjects.dedup();
+    for subj in subjects {
+        let theirs: Vec<Milestone> = ms.iter().filter(|m| m.subject == subj).cloned().collect();
+        b.push_str(&path_section(
+            data,
+            &format!(
+                "The path of {}",
+                names.get(&subj).cloned().unwrap_or(subj.clone())
+            ),
+            &theirs,
+        ));
+    }
+    b
 }
 
 fn grand_overview_card(data: &Data, g: &Grand) -> String {
@@ -629,8 +666,25 @@ fn grand_overview_card(data: &Data, g: &Grand) -> String {
         }
         None => format!("{} projects", fam.len()),
     };
+    let ms: Vec<Milestone> = milestones_of(&of(data, "milestones", &fam))
+        .into_iter()
+        .filter(|m| m.subject == g.slug)
+        .collect();
+    let rated: Vec<(Milestone, Evidence)> = ms
+        .iter()
+        .map(|m| {
+            let items: Vec<(String, String)> =
+                m.criteria.iter().flat_map(|c| evaluate(data, c)).collect();
+            (m.clone(), evidence(&items))
+        })
+        .collect();
+    let path = if rated.is_empty() {
+        String::new()
+    } else {
+        path_svg(&rated)
+    };
     format!(
-        r#"<a class="grand" href="{}/index.html"><h3>{}</h3><p>{}</p><p>{} · {} projects</p></a>"#,
+        r#"<a class="grand" href="{}/index.html"><h3>{}</h3><p>{}</p>{path}<p>{} · {} projects</p></a>"#,
         g.slug,
         esc(&g.title),
         esc(&g.goal),
@@ -782,6 +836,304 @@ fn landscape(rows: &[&Row]) -> String {
             esc(&s(r, "project")),
             esc(&s(r, "what")),
             esc(&s(r, "for_us"))
+        );
+    }
+    b + "</div>"
+}
+
+/// A stop on a path: its horizon, readiness level and criteria (see `evaluate`).
+#[derive(Debug, Clone)]
+pub struct Milestone {
+    pub id: String,
+    pub subject: String,
+    pub ord: i64,
+    pub title: String,
+    pub horizon: String,
+    pub readiness: i64,
+    pub criteria: Vec<String>,
+    pub why: String,
+}
+
+fn milestones_of(rows: &[&Row]) -> Vec<Milestone> {
+    let mut ms: Vec<Milestone> = rows
+        .iter()
+        .map(|r| Milestone {
+            id: s(r, "id"),
+            subject: s(r, "subject"),
+            ord: n(r, "ord"),
+            title: s(r, "title"),
+            horizon: s(r, "horizon"),
+            readiness: n(r, "readiness"),
+            criteria: s(r, "criteria")
+                .split_whitespace()
+                .map(String::from)
+                .collect(),
+            why: s(r, "why"),
+        })
+        .collect();
+    ms.sort_by_key(|m| (m.subject.clone(), m.ord));
+    ms
+}
+
+/// One criterion, read from the data: (what, status) for each thing it names - `feature:ID@PLATFORM`,
+/// `component:ID@DEVICE` (`*` for every one), `tests@DEVICE` (the latest run), `backlog:ID`.
+pub fn evaluate(data: &Data, criterion: &str) -> Vec<(String, String)> {
+    let status_in = |table: &str, a: &str, av: &str, b: &str, bv: &str| -> String {
+        data.rows(table)
+            .iter()
+            .find(|r| s(r, a) == av && s(r, b) == bv)
+            .map(|r| s(r, "status"))
+            .unwrap_or_else(|| "unknown".into())
+    };
+    let every =
+        |table: &str| -> Vec<String> { data.rows(table).iter().map(|r| s(r, "id")).collect() };
+    if let Some(rest) = criterion.strip_prefix("feature:") {
+        let (id, at) = rest.split_once('@').unwrap_or((rest, ""));
+        let ids = if id == "*" {
+            every("features")
+        } else {
+            vec![id.to_string()]
+        };
+        return ids
+            .into_iter()
+            .map(|f| {
+                let st = status_in("feature_support", "feature_id", &f, "platform_id", at);
+                (f, st)
+            })
+            .collect();
+    }
+    if let Some(rest) = criterion.strip_prefix("component:") {
+        let (id, at) = rest.split_once('@').unwrap_or((rest, ""));
+        let ids = if id == "*" {
+            every("components")
+        } else {
+            vec![id.to_string()]
+        };
+        return ids
+            .into_iter()
+            .map(|c| {
+                let st = status_in("support_status", "component_id", &c, "device_id", at);
+                (c, st)
+            })
+            .collect();
+    }
+    if let Some(dev) = criterion.strip_prefix("tests@") {
+        let last = data
+            .rows("test_runs")
+            .iter()
+            .filter(|r| s(r, "device_id") == dev)
+            .max_by_key(|r| s(r, "run_at"));
+        let st = match last {
+            None => "unknown",
+            Some(r) if n(r, "failed") == 0 => "works",
+            Some(_) => "broken",
+        };
+        return vec![(format!("tests on {dev}"), st.into())];
+    }
+    if let Some(id) = criterion.strip_prefix("backlog:") {
+        let st = match data
+            .rows("backlog")
+            .iter()
+            .find(|r| s(r, "id") == id)
+            .map(|r| s(r, "status"))
+        {
+            Some(x) if x == "done" => "works",
+            Some(x) if x == "in-progress" => "partial",
+            Some(_) => "missing",
+            None => "unknown",
+        };
+        return vec![(id.to_string(), st.into())];
+    }
+    vec![(criterion.to_string(), "unknown".into())]
+}
+
+/// A milestone's evidence: good, partly, not yet, unknown - and what that makes it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Evidence {
+    pub good: usize,
+    pub part: usize,
+    pub bad: usize,
+    pub unknown: usize,
+}
+
+impl Evidence {
+    fn total(&self) -> usize {
+        self.good + self.part + self.bad + self.unknown
+    }
+    /// done, in progress, not started, or unknown (nothing measured)
+    pub fn state(&self) -> &'static str {
+        let t = self.total();
+        if t > 0 && self.good == t {
+            "done"
+        } else if self.unknown == t {
+            "unknown"
+        } else if self.good + self.part > 0 {
+            "in progress"
+        } else {
+            "not started"
+        }
+    }
+    fn share(&self) -> f64 {
+        (self.good as f64 + self.part as f64 * 0.5) / self.total().max(1) as f64
+    }
+}
+
+pub fn evidence(items: &[(String, String)]) -> Evidence {
+    let mut e = Evidence {
+        good: 0,
+        part: 0,
+        bad: 0,
+        unknown: 0,
+    };
+    for (_, st) in items {
+        match tone(st) {
+            "good" => e.good += 1,
+            "part" => e.part += 1,
+            "bad" => e.bad += 1,
+            "na" => {}
+            _ => e.unknown += 1,
+        }
+    }
+    e
+}
+
+const HORIZONS: [(&str, &str); 3] = [
+    ("working", "Working"),
+    ("perfection", "Perfection"),
+    ("ongoing", "Ongoing perfection"),
+];
+
+/// The path: three horizons, a stop per milestone with its evidence, the way travelled so far, and
+/// the readiness ladder.
+pub fn path_svg(ms: &[(Milestone, Evidence)]) -> String {
+    let (w, top, line_y) = (1000.0_f64, 34.0_f64, 96.0_f64);
+    let total = ms.len().max(1) as f64;
+    let mut svg = format!(
+        r#"<svg class="path" viewBox="0 0 {w} 210" width="100%" role="img" aria-label="the path">"#
+    );
+    let mut x0 = 20.0;
+    let span = w - 40.0;
+    let mut stops: Vec<(f64, &Milestone, &Evidence)> = Vec::new();
+    for (h, label) in HORIZONS {
+        let in_h: Vec<&(Milestone, Evidence)> = ms.iter().filter(|(m, _)| m.horizon == h).collect();
+        let bw = span * (in_h.len().max(1) as f64 / total.max(3.0)).max(0.12);
+        let _ = write!(
+            svg,
+            r#"<rect x="{x0:.1}" y="{top}" width="{:.1}" height="124" rx="14" class="band"/><text x="{:.1}" y="{}" class="hlabel">{label}</text>"#,
+            bw - 8.0,
+            x0 + 14.0,
+            top + 22.0
+        );
+        for (i, (m, e)) in in_h.iter().enumerate() {
+            stops.push((x0 + bw * (i as f64 + 0.5) / in_h.len() as f64, m, e));
+        }
+        x0 += bw;
+    }
+    let reached = stops
+        .iter()
+        .rposition(|(_, _, e)| e.state() == "done")
+        .map(|i| stops[i].0)
+        .unwrap_or(20.0);
+    let _ = write!(
+        svg,
+        r#"<line x1="20" y1="{line_y}" x2="{:.1}" y2="{line_y}" class="road"/><line x1="20" y1="{line_y}" x2="{reached:.1}" y2="{line_y}" class="travelled"/>"#,
+        x0 - 8.0
+    );
+    for (x, m, e) in &stops {
+        let r = 15.0;
+        let c = 2.0 * std::f64::consts::PI * r;
+        let tn = match e.state() {
+            "done" => "good",
+            "in progress" => "part",
+            "not started" => "bad",
+            _ => "none",
+        };
+        let _ = write!(
+            svg,
+            r#"<g><title>{}: {} - {} of {} criteria good, {} partly, {} not yet, {} unknown</title><circle cx="{x:.1}" cy="{line_y}" r="{r}" class="stop"/><circle cx="{x:.1}" cy="{line_y}" r="{r}" class="ring {tn}" stroke-dasharray="{:.1} {c:.1}" transform="rotate(-90 {x:.1} {line_y})"/><text x="{x:.1}" y="{}" class="frac">{}/{}</text><text x="{x:.1}" y="{}" class="stitle">{}</text></g>"#,
+            esc(&m.title),
+            e.state(),
+            e.good,
+            e.total(),
+            e.part,
+            e.bad,
+            e.unknown,
+            c * e.share(),
+            line_y + 4.5,
+            e.good,
+            e.total(),
+            line_y + 40.0,
+            esc(&cut(&m.title, 22))
+        );
+    }
+    let level = ms
+        .iter()
+        .filter(|(_, e)| e.state() == "done")
+        .map(|(m, _)| m.readiness)
+        .max()
+        .unwrap_or(0);
+    let _ = write!(
+        svg,
+        r#"<text x="20" y="196" class="hlabel">Readiness</text>"#
+    );
+    for l in 1..=9 {
+        let _ = write!(
+            svg,
+            r#"<rect x="{}" y="186" width="26" height="10" rx="3" class="{}"><title>readiness level {l}</title></rect>"#,
+            112 + (l - 1) * 30,
+            if l <= level { "lvl on" } else { "lvl" }
+        );
+    }
+    let _ = write!(
+        svg,
+        r#"<text x="{}" y="196" class="hlabel">level {level} of 9</text>"#,
+        112 + 9 * 30 + 6
+    );
+    svg + "</svg>"
+}
+
+/// A subject's path and the evidence of each of its milestones.
+fn path_section(data: &Data, title: &str, ms: &[Milestone]) -> String {
+    let rated: Vec<(Milestone, Evidence)> = ms
+        .iter()
+        .map(|m| {
+            let items: Vec<(String, String)> =
+                m.criteria.iter().flat_map(|c| evaluate(data, c)).collect();
+            (m.clone(), evidence(&items))
+        })
+        .collect();
+    let mut b = format!(
+        r#"<h2>{}</h2><div class="pathbox">{}</div><div class="cards" style="margin-top:16px">"#,
+        esc(title),
+        path_svg(&rated)
+    );
+    for (m, e) in &rated {
+        let items: Vec<(String, String)> =
+            m.criteria.iter().flat_map(|c| evaluate(data, c)).collect();
+        let mut signs = String::new();
+        for (what, st) in items.iter().take(60) {
+            let tn = tone(st);
+            let _ = write!(
+                signs,
+                r#"<span class="mini {tn}" title="{}: {}">{}</span>"#,
+                esc(what),
+                esc(st),
+                sign(tn)
+            );
+        }
+        let h = HORIZONS
+            .iter()
+            .find(|(k, _)| *k == m.horizon)
+            .map(|(_, l)| *l)
+            .unwrap_or("");
+        let _ = write!(
+            b,
+            r#"<div class="card" id="{}"><h4>{}</h4><span class="chip">{h}</span><span class="chip">readiness {}</span><span class="chip">{}</span><p>{}</p><p class="signs">{signs}</p></div>"#,
+            esc(&m.id),
+            esc(&m.title),
+            m.readiness,
+            e.state(),
+            esc(&m.why)
         );
     }
     b + "</div>"
@@ -1106,6 +1458,75 @@ mod tests {
             tally(&cells, &ids, "linux"),
             [1, 0, 1, 1],
             "c has no cell: not known yet"
+        );
+    }
+
+    #[test]
+    fn criteria_read_the_data_and_stars_expand() {
+        let d = data(&[
+            ("features", "{\"id\":\"calls\"}\n{\"id\":\"sms\"}"),
+            ("feature_support", "{\"feature_id\":\"calls\",\"platform_id\":\"linux-best\",\"status\":\"works\"}"),
+            ("test_runs", "{\"device_id\":\"p\",\"run_at\":\"1\",\"failed\":2}\n{\"device_id\":\"p\",\"run_at\":\"2\",\"failed\":0}"),
+            ("backlog", "{\"id\":\"up\",\"status\":\"in-progress\"}"),
+        ]);
+        assert_eq!(
+            evaluate(&d, "feature:*@linux-best"),
+            [
+                ("calls".to_string(), "works".to_string()),
+                ("sms".to_string(), "unknown".to_string())
+            ]
+        );
+        assert_eq!(
+            evaluate(&d, "tests@p")[0].1,
+            "works",
+            "the latest run counts"
+        );
+        assert_eq!(evaluate(&d, "backlog:up")[0].1, "partial");
+        assert_eq!(evaluate(&d, "backlog:gone")[0].1, "unknown");
+    }
+
+    #[test]
+    fn a_milestones_state_follows_its_evidence() {
+        let e = |g, p, b, u| Evidence {
+            good: g,
+            part: p,
+            bad: b,
+            unknown: u,
+        };
+        assert_eq!(e(3, 0, 0, 0).state(), "done");
+        assert_eq!(e(1, 0, 2, 1).state(), "in progress");
+        assert_eq!(e(0, 0, 2, 1).state(), "not started");
+        assert_eq!(
+            e(0, 0, 0, 4).state(),
+            "unknown",
+            "nothing measured is not 'not started'"
+        );
+    }
+
+    #[test]
+    fn the_path_has_a_stop_per_milestone_and_the_ladder() {
+        let m = |id: &str, h: &str| Milestone {
+            id: id.into(),
+            subject: "x".into(),
+            ord: 1,
+            title: id.into(),
+            horizon: h.into(),
+            readiness: 6,
+            criteria: vec![],
+            why: String::new(),
+        };
+        let e = Evidence {
+            good: 1,
+            part: 0,
+            bad: 0,
+            unknown: 0,
+        };
+        let svg = path_svg(&[(m("a", "working"), e), (m("b", "ongoing"), e)]);
+        assert_eq!(svg.matches(r#"class="stop""#).count(), 2);
+        assert_eq!(svg.matches("readiness level").count(), 9);
+        assert!(
+            svg.contains("level 6 of 9"),
+            "the highest readiness of a done milestone"
         );
     }
 }
