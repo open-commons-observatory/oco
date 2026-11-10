@@ -1310,8 +1310,15 @@ pub struct Sub {
 }
 
 pub fn subs(data: &Data) -> Vec<Sub> {
-    data.rows("projects")
-        .iter()
+    // siblings in the order their marks give (lower first), then by name
+    let mut rows: Vec<&Row> = data.rows("projects").iter().collect();
+    rows.sort_by_key(|p| {
+        (
+            p.get("order").and_then(Value::as_i64).unwrap_or(i64::MAX),
+            s(p, "name"),
+        )
+    });
+    rows.into_iter()
         .filter(|p| {
             s(p, "kind") != "picture"
                 && data
