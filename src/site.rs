@@ -717,10 +717,20 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
         b.push_str(&grand_overview_card(data, g));
     }
     // the other projects with a path of their own: a card each, linking to its pages
-    let others = subs(data);
-    if !others.is_empty() {
-        b.push_str(r#"<h2>Other projects on their way</h2>"#);
-        for p in &others {
+    let all = subs(data);
+    for (heading, home) in [
+        ("The observatory itself", true),
+        ("Other projects on their way", false),
+    ] {
+        let group: Vec<&Sub> = all
+            .iter()
+            .filter(|p| p.id.starts_with(HOME) == home)
+            .collect();
+        if group.is_empty() {
+            continue;
+        }
+        let _ = write!(b, "<h2>{heading}</h2>");
+        for p in group {
             let rated = rate(
                 data,
                 &milestones_of(&of(data, "milestones", std::slice::from_ref(&p.id))),
@@ -1432,6 +1442,36 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
     ]
 }
 
+/// The observatory's own family: the projects with a path that the observatory's organization owns.
+const HOME: &str = "open-commons-observatory/";
+
+fn family_bar(data: &Data, here: &str) -> String {
+    let mut x = String::from(r#"<div class="psub"><b>Observatory</b>"#);
+    let _ = write!(
+        x,
+        r#"<a href="index.html"{}>Overview</a>"#,
+        if here == "index.html" {
+            r#" class="on""#
+        } else {
+            ""
+        }
+    );
+    for p in subs(data).iter().filter(|p| p.id.starts_with(HOME)) {
+        let _ = write!(
+            x,
+            r#"<a href="{}.html"{}>{}</a>"#,
+            p.slug,
+            if here.starts_with(&p.slug) {
+                r#" class="on""#
+            } else {
+                ""
+            },
+            esc(&p.title)
+        );
+    }
+    x + "</div>"
+}
+
 /// A unix time as "YYYY-MM-DD HH:MM UTC" (civil-from-days, no date library).
 pub fn utc(secs: i64) -> String {
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
@@ -1466,7 +1506,16 @@ pub fn render(data: &Data, out: &Path) -> Result<()> {
     };
     std::fs::write(
         out.join("index.html"),
-        page.render(None, "", "Observatory", &observatory(data, &grands)),
+        page.render(
+            None,
+            "",
+            "Observatory",
+            &format!(
+                "{}{}",
+                family_bar(data, "index.html"),
+                observatory(data, &grands)
+            ),
+        ),
     )?;
     std::fs::write(
         out.join("how-we-work.html"),
@@ -1474,6 +1523,11 @@ pub fn render(data: &Data, out: &Path) -> Result<()> {
     )?;
     for p in subs(data) {
         for (file, title, body) in sub_pages(data, &p) {
+            let body = if p.id.starts_with(HOME) {
+                format!("{}{body}", family_bar(data, &file))
+            } else {
+                body
+            };
             std::fs::write(out.join(&file), page.render(None, &file, &title, &body))?;
         }
     }
