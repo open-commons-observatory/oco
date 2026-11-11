@@ -318,6 +318,12 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
         "matrix" => {
             let rows = of(data, &k("table"), fam);
             let cells = cells_of(&rows, &k("row_key"), &k("column_key"));
+            // what others report, beside what we measure - only when the view names a reports table
+            let reports = reports_of(
+                &of(data, &k("reports"), fam),
+                &k("row_key"),
+                &k("column_key"),
+            );
             let mut lines = lines_from(
                 data,
                 &k("rows"),
@@ -353,9 +359,14 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
                     .filter(|(id, _, _)| cells.keys().any(|(_, c)| c == id))
                     .collect(),
             );
+            let legend = if reports.is_empty() {
+                String::new()
+            } else {
+                reports_legend(data, &k("reports_research"))
+            };
             format!(
-                "{head}{status_legend}{}",
-                table(&label, &lines, &cols, &cells)
+                "{head}{status_legend}{}{legend}",
+                table_with(&label, &lines, &cols, &cells, &reports)
             )
         }
         "families" => {
@@ -588,6 +599,45 @@ pub struct Line {
 
 /// A status table: rows under group rows, ranked columns with their share, a sign in every cell.
 pub fn table(first: &str, lines: &[Line], cols: &[Column], cells: &Cells) -> String {
+    table_with(first, lines, cols, cells, &Cells::new())
+}
+
+/// What others report, keyed like the cells: (row, column) -> (status, source). A report's source is
+/// often a Markdown link; its title is kept.
+pub fn reports_of(rows: &[&Row], row_key: &str, col_key: &str) -> Cells {
+    rows.iter()
+        .map(|r| {
+            let src = s(r, "source");
+            let title = src
+                .strip_prefix('[')
+                .and_then(|x| x.split_once("]("))
+                .map(|(t, _)| t.to_string())
+                .unwrap_or(src);
+            ((s(r, row_key), s(r, col_key)), (s(r, "status"), title))
+        })
+        .collect()
+}
+
+/// The note under a table with reports: what the outlines mean, and which research compared them, when.
+fn reports_legend(data: &Data, research: &str) -> String {
+    let r = data
+        .rows("research")
+        .iter()
+        .find(|r| s(r, "id") == research)
+        .map(|r| format!(" {} ({})", esc(&s(r, "question")), esc(&s(r, "date"))))
+        .unwrap_or_default();
+    format!(r#"<p class="mute reports-legend">⟦reports-legend⟧{r}</p>"#)
+}
+
+/// The table, with what others report beside what we measure: a cell we have not measured but others
+/// report is drawn outlined; a cell where the report disagrees shows both marks, ours first.
+pub fn table_with(
+    first: &str,
+    lines: &[Line],
+    cols: &[Column],
+    cells: &Cells,
+    reports: &Cells,
+) -> String {
     let mut t = format!(
         r#"<div class="scroll"><table class="grid"><thead><tr><th class="first">{}</th>"#,
         esc(first)
@@ -623,8 +673,9 @@ pub fn table(first: &str, lines: &[Line], cols: &[Column], cells: &Cells) -> Str
             esc(&l.name)
         );
         for c in cols {
+            let key = (l.id.clone(), c.id.clone());
             let (st, note) = cells
-                .get(&(l.id.clone(), c.id.clone()))
+                .get(&key)
                 .cloned()
                 .unwrap_or_else(|| ("unknown".into(), String::new()));
             let tn = tone(&st);
@@ -633,12 +684,47 @@ pub fn table(first: &str, lines: &[Line], cols: &[Column], cells: &Cells) -> Str
             } else {
                 format!("{} on {}: {st} - {note}", l.name, c.name)
             };
-            let _ = write!(
-                t,
-                r#"<td class="s {tn}" title="{}">{}</td>"#,
-                esc(&cut(&tip, 320)),
-                sign(tn)
-            );
+            let measured = st != "unknown";
+            match reports.get(&key) {
+                // nothing measured, something reported: outlined, in the report's colour
+                Some((rs, src)) if !measured => {
+                    let rt = tone(rs);
+                    let tip = format!(
+                        "{} on {}: reported {rs} by {src} - not confirmed by our checks",
+                        l.name, c.name
+                    );
+                    let _ = write!(
+                        t,
+                        r#"<td class="s {rt} reported" title="{}">{}</td>"#,
+                        esc(&cut(&tip, 320)),
+                        sign(rt)
+                    );
+                }
+                // measured, and the report says otherwise: both marks, ours first
+                Some((rs, src)) if tone(rs) != tn => {
+                    let rt = tone(rs);
+                    let tip = format!("{tip}; reported {rs} by {src}");
+                    let _ = write!(
+                        t,
+                        r#"<td class="s {tn} disagrees" title="{}">{}<span class="rep {rt}">{}</span></td>"#,
+                        esc(&cut(&tip, 320)),
+                        sign(tn),
+                        sign(rt)
+                    );
+                }
+                agreeing => {
+                    let tip = match agreeing {
+                        Some((_, src)) => format!("{tip}; reported the same by {src}"),
+                        None => tip,
+                    };
+                    let _ = write!(
+                        t,
+                        r#"<td class="s {tn}" title="{}">{}</td>"#,
+                        esc(&cut(&tip, 320)),
+                        sign(tn)
+                    );
+                }
+            }
         }
         t.push_str("</tr>");
     }
@@ -807,6 +893,8 @@ abbr.word{text-decoration:underline dotted;text-underline-offset:3px;cursor:help
 .badge .rests{margin-left:6px;padding:0 6px;border-radius:99px;background:var(--accent);color:var(--bg);font-size:11px}.research .sources{font-size:14px;padding-left:18px;margin:8px 0}.research .sources li{margin:4px 0}
 .tl .tlrow{display:grid;grid-template-columns:110px minmax(120px,220px) minmax(80px,180px) 1fr;gap:14px;align-items:start;padding:8px 0;border-top:1px solid var(--line)}.tlhead{font-size:13px;color:var(--mute)}
 .tlc{display:flex;align-items:center;gap:8px}.tlbar{display:inline-block;height:8px;border-radius:4px;background:var(--mute);min-width:2px}.tlm{font-size:14px}@media(max-width:700px){.tl .tlrow{grid-template-columns:90px 1fr}}
+.grid td.s.reported{background:transparent;color:var(--fg)}.grid td.s.reported.good{box-shadow:inset 0 0 0 2px var(--good)}.grid td.s.reported.part{box-shadow:inset 0 0 0 2px var(--part)}.grid td.s.reported.bad{box-shadow:inset 0 0 0 2px var(--bad)}
+.grid td.s .rep{display:inline-block;margin-left:5px;padding:0 5px;border-radius:5px;background:var(--bg);color:var(--fg);font-size:11px}.reports-legend{font-size:13.5px;margin-top:10px}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -3879,6 +3967,69 @@ mod tests {
             bar.matches(r#"class="on""#).count(),
             1,
             "one name beginning with another marks only its own page: {bar}"
+        );
+    }
+
+    #[test]
+    fn reports_are_drawn_outlined_and_disagreements_side_by_side() {
+        let lines = vec![
+            Line {
+                id: "calls".into(),
+                name: "Calls".into(),
+                group: "g".into(),
+                about: String::new(),
+            },
+            Line {
+                id: "sensors".into(),
+                name: "Sensors".into(),
+                group: "g".into(),
+                about: String::new(),
+            },
+            Line {
+                id: "wifi".into(),
+                name: "Wi-Fi".into(),
+                group: "g".into(),
+                about: String::new(),
+            },
+        ];
+        let cols = vec![Column {
+            id: "surya".into(),
+            name: "surya".into(),
+            kind: String::new(),
+            share: 0.5,
+        }];
+        let cells: Cells = [
+            (
+                ("sensors".into(), "surya".into()),
+                ("broken".into(), String::new()),
+            ),
+            (
+                ("wifi".into(), "surya".into()),
+                ("works".into(), String::new()),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let rows = data(&[("wiki_claims", "{\"component_id\":\"calls\",\"device_id\":\"surya\",\"status\":\"works\",\"source\":\"[the wiki](https://example.org)\"}\n{\"component_id\":\"sensors\",\"device_id\":\"surya\",\"status\":\"works\",\"source\":\"[the wiki](https://example.org)\"}\n{\"component_id\":\"wifi\",\"device_id\":\"surya\",\"status\":\"works\",\"source\":\"[the wiki](https://example.org)\"}")]);
+        let reports = reports_of(
+            &rows.rows("wiki_claims").iter().collect::<Vec<_>>(),
+            "component_id",
+            "device_id",
+        );
+        let t = table_with("Part", &lines, &cols, &cells, &reports);
+        assert!(t.contains(r#"class="s good reported" title="Calls on surya: reported works by the wiki - not confirmed by our checks""#), "{t}");
+        assert!(
+            t.contains(r#"class="s bad disagrees""#) && t.contains(r#"<span class="rep good">"#),
+            "both marks where they disagree: {t}"
+        );
+        assert!(
+            t.contains("reported the same by the wiki"),
+            "agreement is told in the tip"
+        );
+        assert_eq!(
+            table("Part", &lines, &cols, &cells),
+            table_with("Part", &lines, &cols, &cells, &Cells::new()),
+            "no reports, the table as before"
         );
     }
 }
