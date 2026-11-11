@@ -805,6 +805,8 @@ abbr.word{text-decoration:underline dotted;text-underline-offset:3px;cursor:help
 .hrow.sat .hact{font-weight:600}.chip.warn{border-color:var(--accent);color:var(--accent)}@media(max-width:640px){.hand .hrow{grid-template-columns:1fr 56px}.hand .hbarbox,.hand .hrow .chip:last-child{display:none}}
 .hnum{font-size:13.5px;color:var(--mute)}.hnum b{color:var(--fg)}.decided{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.badge{font-size:12.5px;padding:3px 10px;border-radius:99px;background:var(--soft);border:1px solid var(--line);cursor:help}
 .badge .rests{margin-left:6px;padding:0 6px;border-radius:99px;background:var(--accent);color:var(--bg);font-size:11px}.research .sources{font-size:14px;padding-left:18px;margin:8px 0}.research .sources li{margin:4px 0}
+.tl .tlrow{display:grid;grid-template-columns:110px minmax(120px,220px) minmax(80px,180px) 1fr;gap:14px;align-items:start;padding:8px 0;border-top:1px solid var(--line)}.tlhead{font-size:13px;color:var(--mute)}
+.tlc{display:flex;align-items:center;gap:8px}.tlbar{display:inline-block;height:8px;border-radius:4px;background:var(--mute);min-width:2px}.tlm{font-size:14px}@media(max-width:700px){.tl .tlrow{grid-template-columns:90px 1fr}}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -2185,6 +2187,24 @@ pub fn vocabulary_html(data: &Data, fam: &[String]) -> String {
                 .collect();
             let _ = write!(c, "<p><b>⟦words-see⟧</b> {}</p>", links.join(", "));
         }
+        for id in s(r, "decided")
+            .split(',')
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+        {
+            if let Some(d) = data.rows("decisions").iter().find(|d| s(d, "id") == id) {
+                let _ = write!(
+                    c,
+                    r#"<div class="decided"><span class="badge" title="{}">{}</span></div>"#,
+                    esc(&format!(
+                        "{} - ⟦rejected⟧ {}",
+                        s(d, "why"),
+                        s(d, "rejected")
+                    )),
+                    esc(&cut(&s(d, "decision"), 70))
+                );
+            }
+        }
         c + "</div>"
     };
     let mut own: Vec<&Row> = of(data, "vocabulary", fam)
@@ -2257,7 +2277,7 @@ pub fn handwork_html(data: &Data, fam: &[String]) -> String {
             }
         );
     }
-    b + "</div>"
+    b + "</div>" + &timeline_html(data, fam)
 }
 
 /// The decisions about a step, as small badges: what was chosen, with why and what was rejected on
@@ -2360,6 +2380,94 @@ pub fn research_html(data: &Data, fam: &[String]) -> String {
         b.push_str(r#"<p class="mute">⟦attention-none⟧</p>"#);
     }
     b
+}
+
+/// Manual work beside the commits and releases of the same days: what was done by hand, set where it
+/// can be related to what the work produced. The newest fourteen days that have anything to show.
+pub fn timeline_html(data: &Data, fam: &[String]) -> String {
+    use std::collections::BTreeMap;
+    #[derive(Default)]
+    struct Day {
+        commits: i64,
+        releases: Vec<String>,
+        manual: BTreeMap<String, (i64, i64)>,
+    }
+    let mut days: BTreeMap<String, Day> = BTreeMap::new();
+    for r in of(data, "activity", fam) {
+        days.entry(s(r, "id")).or_default().commits += n(r, "commits");
+    }
+    for r in of(data, "releases", fam) {
+        let d: String = s(r, "published").chars().take(10).collect();
+        if d.len() == 10 {
+            days.entry(d).or_default().releases.push(s(r, "name"));
+        }
+    }
+    let actions: BTreeMap<String, String> = of(data, "manual_work", fam)
+        .into_iter()
+        .map(|r| (s(r, "id"), s(r, "action")))
+        .collect();
+    for r in of(data, "manual_events", fam) {
+        let day: String = s(r, "at").chars().take(10).collect();
+        if day.len() < 10 {
+            continue;
+        }
+        let what = actions
+            .get(&s(r, "record"))
+            .cloned()
+            .unwrap_or_else(|| s(r, "record"));
+        let e = days.entry(day).or_default().manual.entry(what).or_default();
+        e.0 += 1;
+        e.1 += n(r, "effort");
+    }
+    let shown: Vec<(&String, &Day)> = days
+        .iter()
+        .rev()
+        .filter(|(_, d)| d.commits > 0 || !d.releases.is_empty() || !d.manual.is_empty())
+        .take(14)
+        .collect();
+    if shown.is_empty() {
+        return String::new();
+    }
+    let max = shown
+        .iter()
+        .map(|(_, d)| d.commits)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let mut b = String::from(
+        r#"<h2>⟦timeline⟧</h2><p class="lead">⟦timeline-lead⟧</p><div class="tl"><div class="tlrow tlhead"><span>⟦timeline-day⟧</span><span>⟦timeline-commits⟧</span><span>⟦timeline-releases⟧</span><span>⟦view-hand⟧</span></div>"#,
+    );
+    for (day, d) in shown {
+        let rel: String = d
+            .releases
+            .iter()
+            .map(|x| format!(r#"<span class="chip">{}</span>"#, esc(x)))
+            .collect();
+        let man: Vec<String> = d
+            .manual
+            .iter()
+            .map(|(a, (c, e))| {
+                format!(
+                    "{} <b>{c}×</b>{}",
+                    esc(a),
+                    if *e > 0 {
+                        format!(" · {e}")
+                    } else {
+                        String::new()
+                    }
+                )
+            })
+            .collect();
+        let _ = write!(
+            b,
+            r#"<div class="tlrow"><time>{}</time><span class="tlc"><span class="tlbar" style="width:{}%"></span>{}</span><span>{rel}</span><span class="tlm">{}</span></div>"#,
+            esc(day),
+            d.commits * 100 / max,
+            d.commits,
+            man.join("<br>")
+        );
+    }
+    b + "</div>"
 }
 
 /// Where the whole is weakest right now, read from every project's data: what waits on a person,
@@ -3714,6 +3822,45 @@ mod tests {
         assert!(
             r.find("research-sources").unwrap() < r.find("Other").unwrap(),
             "an uncited source is listed apart"
+        );
+    }
+
+    #[test]
+    fn manual_work_is_set_beside_the_days_commits_and_releases() {
+        let d = data(&[
+            ("activity", "{\"id\":\"2026-11-10\",\"commits\":3,\"project\":\"o/p\"}\n{\"id\":\"2026-11-11\",\"commits\":6,\"project\":\"o/p\"}"),
+            ("releases", "{\"id\":\"v1\",\"name\":\"v1\",\"published\":\"2026-11-11\",\"project\":\"o/p\"}"),
+            ("manual_work", "{\"id\":\"patch\",\"action\":\"patch source by text\",\"project\":\"o/p\"}"),
+            ("manual_events", "{\"id\":\"a\",\"record\":\"patch\",\"at\":\"2026-11-11T10:00:00Z\",\"effort\":2,\"project\":\"o/p\"}\n{\"id\":\"b\",\"record\":\"patch\",\"at\":\"2026-11-11T12:00:00Z\",\"effort\":3,\"project\":\"o/p\"}"),
+        ]);
+        let t = timeline_html(&d, &["o/p".to_string()]);
+        assert!(
+            t.find("2026-11-11").unwrap() < t.find("2026-11-10").unwrap(),
+            "newest first"
+        );
+        assert!(
+            t.contains("patch source by text <b>2×</b> · 5")
+                && t.contains(r#"<span class="chip">v1</span>"#),
+            "{t}"
+        );
+        assert_eq!(
+            timeline_html(&d, &["o/q".to_string()]),
+            "",
+            "nothing to show, nothing drawn"
+        );
+    }
+
+    #[test]
+    fn a_word_shows_the_decision_that_chose_it() {
+        let d = data(&[
+            ("vocabulary", "{\"id\":\"lens\",\"term\":\"lens\",\"means\":\"a grand view\",\"decided\":\"w1\",\"project\":\"open-commons-observatory/ocoeco\"}"),
+            ("decisions", "{\"id\":\"w1\",\"decision\":\"A grand view is a lens.\",\"why\":\"you look through it\",\"rejected\":\"view\",\"project\":\"open-commons-observatory/ocoeco\"}"),
+        ]);
+        let h = vocabulary_html(&d, &["o/p".to_string()]);
+        assert!(
+            h.contains("A grand view is a lens.")
+                && h.contains("you look through it - ⟦rejected⟧ view"),
+            "{h}"
         );
     }
 }
