@@ -1123,14 +1123,14 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
         .iter()
         .filter(|r| s(r, "status") != "done")
         .count();
+    let attention = attention_html(data);
     let mut b = format!(
         r#"<h1>Open Commons Observatory</h1><p class="lead">⟦observatory-lead⟧</p>
-<div class="stats"><div class="stat"><b>{}</b><span>⟦stat-grand-projects⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-projects⟧</span></div><div class="stat"><b>{open}</b><span>⟦stat-open-items⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-log-entries⟧</span></div></div><h2>⟦grand-projects⟧</h2>"#,
+<div class="stats"><div class="stat"><b>{}</b><span>⟦stat-grand-projects⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-projects⟧</span></div><div class="stat"><b>{open}</b><span>⟦stat-open-items⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-log-entries⟧</span></div></div>{attention}<h2>⟦grand-projects⟧</h2>"#,
         grands.len(),
         projects.len(),
         data.rows("session_log").len()
     );
-    b.push_str(&attention_html(data));
     for g in grands.iter().filter(|g| g.curated) {
         b.push_str(&grand_overview_card(data, g));
     }
@@ -2238,6 +2238,12 @@ pub fn attention_html(data: &Data) -> String {
     for id in &ids {
         let one = std::slice::from_ref(id);
         let ms = milestones_of(&of(data, "milestones", one));
+        if !of(data, "backlog", one)
+            .iter()
+            .any(|r| s(r, "status") == "in-progress")
+        {
+            continue; // attention is for projects being worked on: a parked one waits by choice
+        }
         let workings = of(data, "workings", one);
         let open: Vec<String> = rate(data, &ms)
             .into_iter()
@@ -2272,6 +2278,9 @@ pub fn attention_html(data: &Data) -> String {
             .count();
         if doing == 0 {
             continue;
+        }
+        if of(data, "activity", one).is_empty() {
+            continue; // not gathered yet: unknown, not quiet
         }
         let last = of(data, "activity", one)
             .iter()
@@ -3417,6 +3426,20 @@ mod tests {
         assert!(
             h.contains("2020-01-01"),
             "work gone quiet since its last commit"
+        );
+        let parked = data(&[
+            ("projects", "{\"id\":\"o/q\",\"name\":\"Q\",\"kind\":\"tool\",\"parent\":\"x\"}"),
+            ("backlog", "{\"id\":\"x\",\"title\":\"X\",\"status\":\"in-progress\",\"project\":\"o/q\"}\n{\"id\":\"y\",\"title\":\"Y\",\"status\":\"open\",\"project\":\"o/r\"}"),
+            ("milestones", "{\"id\":\"m\",\"subject\":\"r\",\"ord\":1,\"title\":\"Far\",\"horizon\":\"working\",\"readiness\":3,\"criteria\":\"backlog:y\",\"why\":\"\",\"project\":\"o/r\"}"),
+        ]);
+        let p = attention_html(&parked);
+        assert!(
+            !p.contains("Far"),
+            "a parked project's steps wait by choice"
+        );
+        assert!(
+            !p.contains("last commit"),
+            "not gathered yet is unknown, not quiet"
         );
     }
 }
