@@ -409,6 +409,7 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
             b + "</div>"
         }
         "heartbeat" => format!("{head}{}", made_by_work(data, fam, now_secs())),
+        "vocabulary" => vocabulary_html(data, fam),
         // the signature view: the whole chain of the lens's subject on one page
         "essence" => {
             let subject = Some(k("subject"))
@@ -454,7 +455,10 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
                         .unwrap_or_else(|| (*p).clone());
                     let _ = write!(b, "<h1>{}</h1>", esc(&name));
                 }
-                b.push_str(&idea_html(&of(data, "idea", std::slice::from_ref(*p))));
+                b.push_str(&mark_words(
+                    &idea_html(&of(data, "idea", std::slice::from_ref(*p))),
+                    &own_words(data, std::slice::from_ref(*p)),
+                ));
             }
             if b.is_empty() {
                 b = idea_html(&[]);
@@ -791,6 +795,9 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 .working b{display:block;margin-bottom:6px}.working p{margin:8px 0 0;font-size:14.5px}.working .why{color:var(--mute)}
 @media(max-width:820px){.serve{grid-template-columns:1fr}.flow{margin-left:8px;padding-left:28px}.step::before{left:-49px}}
 .tells{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 0;font-size:12.5px}.tells .on{color:var(--good)}.tells .off{color:var(--mute)}
+abbr.word{text-decoration:underline dotted;text-underline-offset:3px;cursor:help}dfn{font-style:normal}
+.attention{background:var(--soft);border-radius:16px;padding:18px 22px 8px;margin:26px 0 34px}.attention h2{margin-top:0}.attn{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
+.attn h3{font-size:15px;margin:0 0 8px}.attn ul{margin:0;padding-left:18px}.attn li{margin:0 0 7px;font-size:14.5px}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -1123,6 +1130,7 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
         projects.len(),
         data.rows("session_log").len()
     );
+    b.push_str(&attention_html(data));
     for g in grands.iter().filter(|g| g.curated) {
         b.push_str(&grand_overview_card(data, g));
     }
@@ -1762,12 +1770,13 @@ pub fn subs(data: &Data) -> Vec<Sub> {
         .collect()
 }
 
-const SUB_VIEWS: [(&str, &str); 5] = [
+const SUB_VIEWS: [(&str, &str); 6] = [
     ("", "⟦view-essence⟧"),
     ("-idea", "⟦view-idea⟧"),
     ("-backlog", "⟦view-backlog⟧"),
     ("-log", "⟦view-log⟧"),
     ("-ideas", "⟦view-ideas⟧"),
+    ("-words", "⟦view-words⟧"),
 ];
 
 fn sub_nav(p: &Sub, here: &str) -> String {
@@ -1841,12 +1850,17 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
     vec![
         (format!("{}.html", p.slug), p.title.clone(), how),
         (
+            format!("{}-words.html", p.slug),
+            format!("⟦view-words⟧ · {}", p.title),
+            format!("{}{}", sub_nav(p, "-words"), vocabulary_html(data, &fam)),
+        ),
+        (
             format!("{}-idea.html", p.slug),
             format!("⟦view-idea⟧ · {}", p.title),
             format!(
                 "{}{}",
                 sub_nav(p, "-idea"),
-                idea_html(&of(data, "idea", &fam))
+                mark_words(&idea_html(&of(data, "idea", &fam)), &own_words(data, &fam))
             ),
         ),
         (
@@ -2073,6 +2087,216 @@ pub fn idea_html(rows: &[&Row]) -> String {
         }
     }
     b + "</article>"
+}
+
+/// ocoeco's own project: its vocabulary holds the shared words every project speaks.
+const LANGUAGE: &str = "open-commons-observatory/ocoeco";
+
+/// A family's own words (not ocoeco's shared ones): term and meaning.
+fn own_words(data: &Data, fam: &[String]) -> Vec<(String, String)> {
+    of(data, "vocabulary", fam)
+        .into_iter()
+        .filter(|r| s(r, "project") != LANGUAGE)
+        .map(|r| (s(r, "term"), s(r, "means")))
+        .collect()
+}
+
+/// Marks the first use of each of a project's own words in a piece of writing, with its meaning beside
+/// it. Only its own words: ocoeco's shared words are often ordinary English, used in prose in their
+/// ordinary sense.
+pub fn mark_words(html: &str, words: &[(String, String)]) -> String {
+    let mut out = html.to_string();
+    let mut ws: Vec<&(String, String)> =
+        words.iter().filter(|(t, _)| !t.trim().is_empty()).collect();
+    ws.sort_by_key(|(t, _)| std::cmp::Reverse(t.len()));
+    for (term, means) in ws {
+        let low = out.to_lowercase();
+        if low.len() != out.len() {
+            break;
+        }
+        let t = term.to_lowercase();
+        let mut from = 0;
+        while let Some(i) = low[from..].find(&t) {
+            let (at, end) = (from + i, from + i + t.len());
+            let edge = |c: Option<char>| c.is_none_or(|c| !c.is_alphanumeric());
+            let in_tag = low[..at].rfind('<') > low[..at].rfind('>');
+            let in_word = low[..at].rfind("<abbr") > low[..at].rfind("</abbr>");
+            if edge(low[..at].chars().next_back())
+                && edge(low[end..].chars().next())
+                && !in_tag
+                && !in_word
+                && out.is_char_boundary(at)
+                && out.is_char_boundary(end)
+            {
+                out = format!(
+                    r#"{}<abbr class="word" title="{}">{}</abbr>{}"#,
+                    &out[..at],
+                    esc(means),
+                    &out[at..end],
+                    &out[end..]
+                );
+                break;
+            }
+            from = end;
+        }
+    }
+    out
+}
+
+/// The words a project or a family speaks: its own, then ocoeco's shared ones - each with what it means,
+/// what it is not, and related words.
+pub fn vocabulary_html(data: &Data, fam: &[String]) -> String {
+    let card = |r: &&Row| {
+        let (term, not, see) = (s(r, "term"), s(r, "not"), s(r, "see"));
+        let mut c = format!(
+            r#"<div class="card" id="w-{}"><h4><dfn>{}</dfn></h4><p>{}</p>"#,
+            slug(&term),
+            esc(&term),
+            esc(&s(r, "means"))
+        );
+        if !not.is_empty() {
+            let _ = write!(c, "<p><b>⟦words-not⟧</b> {}</p>", esc(&not));
+        }
+        if !see.is_empty() {
+            let links: Vec<String> = see
+                .split(',')
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+                .map(|x| format!(r##"<a href="#w-{}">{}</a>"##, slug(x), esc(x)))
+                .collect();
+            let _ = write!(c, "<p><b>⟦words-see⟧</b> {}</p>", links.join(", "));
+        }
+        c + "</div>"
+    };
+    let mut own: Vec<&Row> = of(data, "vocabulary", fam)
+        .into_iter()
+        .filter(|r| s(r, "project") != LANGUAGE)
+        .collect();
+    let language = [LANGUAGE.to_string()];
+    let mut shared = of(data, "vocabulary", &language);
+    own.sort_by_key(|r| s(r, "term").to_lowercase());
+    shared.sort_by_key(|r| s(r, "term").to_lowercase());
+    let mut b = String::from(r#"<h1>⟦view-words⟧</h1><p class="lead">⟦words-lead⟧</p>"#);
+    if !own.is_empty() {
+        b.push_str(r#"<h2>⟦words-own⟧</h2><div class="cards">"#);
+        b.extend(own.iter().map(card));
+        b.push_str("</div>");
+    }
+    b.push_str(r#"<h2>⟦words-shared⟧</h2><div class="cards">"#);
+    b.extend(shared.iter().map(card));
+    b + "</div>"
+}
+
+/// Where the whole is weakest right now, read from every project's data: what waits on a person,
+/// steps that nothing delivers, and work that has gone quiet. Read before choosing the next piece.
+pub fn attention_html(data: &Data) -> String {
+    let page: std::collections::HashMap<String, String> = subs(data)
+        .into_iter()
+        .map(|p| (p.id.clone(), p.slug.clone()))
+        .collect();
+    let name = |id: &str| {
+        let t = data
+            .rows("projects")
+            .iter()
+            .find(|p| s(p, "id") == id)
+            .map(|p| first(p, &["title", "name"]))
+            .unwrap_or_else(|| id.to_string());
+        match page.get(id) {
+            Some(sl) => format!(r#"<a href="{}.html">{}</a>"#, sl, esc(&t)),
+            None => esc(&t),
+        }
+    };
+    let list = |items: Vec<String>| {
+        if items.is_empty() {
+            r#"<p class="mute">⟦attention-none⟧</p>"#.to_string()
+        } else {
+            format!(
+                "<ul>{}</ul>",
+                items
+                    .iter()
+                    .take(7)
+                    .map(|i| format!("<li>{i}</li>"))
+                    .collect::<String>()
+            )
+        }
+    };
+    let waiting: Vec<String> = data
+        .rows("backlog")
+        .iter()
+        .filter(|r| s(r, "status") != "done" && !s(r, "waits").is_empty())
+        .map(|r| {
+            format!(
+                "{} · {} <span class=\"chip\">{}</span>",
+                name(&s(r, "project")),
+                esc(&s(r, "title")),
+                esc(&s(r, "waits"))
+            )
+        })
+        .collect();
+    let mut unserved: Vec<(usize, String)> = Vec::new();
+    let ids: Vec<String> = data.rows("projects").iter().map(|p| s(p, "id")).collect();
+    for id in &ids {
+        let one = std::slice::from_ref(id);
+        let ms = milestones_of(&of(data, "milestones", one));
+        let workings = of(data, "workings", one);
+        let open: Vec<String> = rate(data, &ms)
+            .into_iter()
+            .filter(|(m, e)| {
+                e.state() != "done" && !workings.iter().any(|w| s(w, "serves") == m.id)
+            })
+            .map(|(m, _)| m.title)
+            .collect();
+        if !open.is_empty() {
+            unserved.push((
+                open.len(),
+                format!(
+                    "{} · {}: {}",
+                    name(id),
+                    open.len(),
+                    esc(&open.iter().take(3).cloned().collect::<Vec<_>>().join(", "))
+                ),
+            ));
+        }
+    }
+    unserved.sort_by_key(|(n, _)| std::cmp::Reverse(*n));
+    let week = utc(now_secs() - 7 * 86_400)
+        .chars()
+        .take(10)
+        .collect::<String>();
+    let mut quiet: Vec<String> = Vec::new();
+    for id in &ids {
+        let one = std::slice::from_ref(id);
+        let doing = of(data, "backlog", one)
+            .iter()
+            .filter(|r| s(r, "status") == "in-progress")
+            .count();
+        if doing == 0 {
+            continue;
+        }
+        let last = of(data, "activity", one)
+            .iter()
+            .filter(|r| n(r, "commits") > 0)
+            .map(|r| s(r, "id"))
+            .max()
+            .unwrap_or_default();
+        if last < week {
+            quiet.push(format!(
+                "{} · {doing} ⟦attention-in-progress⟧, ⟦attention-last⟧ {}",
+                name(id),
+                if last.is_empty() {
+                    "-".into()
+                } else {
+                    esc(&last)
+                }
+            ));
+        }
+    }
+    format!(
+        r#"<section class="attention"><h2>⟦attention⟧</h2><p class="lead">⟦attention-lead⟧</p><div class="attn"><div><h3>⟦attention-waits⟧</h3>{}</div><div><h3>⟦attention-unserved⟧</h3>{}</div><div><h3>⟦attention-quiet⟧</h3>{}</div></div></section>"#,
+        list(waiting),
+        list(unserved.into_iter().map(|(_, x)| x).collect()),
+        list(quiet)
+    )
 }
 
 /// How completely a project tells its essence - why, what, how, now - by one rule, wherever it is
@@ -2714,6 +2938,7 @@ mod tests {
             pages.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),
             [
                 "project-tad.html",
+                "project-tad-words.html",
                 "project-tad-idea.html",
                 "project-tad-backlog.html",
                 "project-tad-log.html",
@@ -3141,5 +3366,57 @@ mod tests {
         crate::i18n::set("ru");
         assert_eq!(localize(&kind_word("gatherer")), "сборщик");
         crate::i18n::set("en");
+    }
+
+    #[test]
+    fn a_projects_own_words_are_marked_once_outside_tags() {
+        let w = vec![("hypha".to_string(), "the first filament".to_string())];
+        let h = mark_words(
+            r#"<p>Hypha grows. <a href="hypha.html">x</a> a hypha again</p>"#,
+            &w,
+        );
+        assert_eq!(h.matches("<abbr").count(), 1, "{h}");
+        assert!(
+            h.contains(r#"<abbr class="word" title="the first filament">Hypha</abbr> grows"#),
+            "first use, its own case: {h}"
+        );
+        assert!(h.contains(r#"href="hypha.html""#), "never inside a tag");
+        assert_eq!(
+            mark_words("<p>hyphae</p>", &w),
+            "<p>hyphae</p>",
+            "whole words only"
+        );
+    }
+
+    #[test]
+    fn the_vocabulary_shows_own_words_then_the_shared_ones() {
+        let d = data(&[("vocabulary", "{\"id\":\"lens\",\"term\":\"lens\",\"means\":\"a grand view\",\"not\":\"a page\",\"see\":\"mark\",\"project\":\"open-commons-observatory/ocoeco\"}\n{\"id\":\"shoot\",\"term\":\"shoot\",\"means\":\"what grows\",\"project\":\"o/p\"}")]);
+        let h = vocabulary_html(&d, &["o/p".to_string()]);
+        assert!(h.find("words-own").unwrap() < h.find("words-shared").unwrap());
+        assert!(
+            h.contains(r#"id="w-shoot""#)
+                && h.contains(r#"id="w-lens""#)
+                && h.contains(r##"<a href="#w-mark">mark</a>"##)
+        );
+    }
+
+    #[test]
+    fn attention_shows_what_waits_what_nothing_serves_and_what_went_quiet() {
+        let d = data(&[
+            ("projects", "{\"id\":\"o/p\",\"name\":\"P\",\"kind\":\"tool\",\"parent\":\"x\"}"),
+            ("backlog", "{\"id\":\"sim\",\"title\":\"A SIM card\",\"status\":\"open\",\"waits\":\"author\",\"project\":\"o/p\"}\n{\"id\":\"w\",\"title\":\"W\",\"status\":\"in-progress\",\"project\":\"o/p\"}"),
+            ("milestones", "{\"id\":\"m1\",\"subject\":\"p\",\"ord\":1,\"title\":\"Calls\",\"horizon\":\"working\",\"readiness\":3,\"criteria\":\"backlog:w\",\"why\":\"\",\"project\":\"o/p\"}"),
+            ("activity", "{\"id\":\"2020-01-01\",\"commits\":3,\"project\":\"o/p\"}"),
+        ]);
+        let h = attention_html(&d);
+        assert!(
+            h.contains("A SIM card") && h.contains(">author<"),
+            "waits on a person"
+        );
+        assert!(h.contains("1: Calls"), "a step nothing delivers");
+        assert!(
+            h.contains("2020-01-01"),
+            "work gone quiet since its last commit"
+        );
     }
 }
