@@ -138,3 +138,4 @@ timeline-lead = День за днём: что дала работа и что �
 timeline-day = День
 timeline-commits = Коммиты
 timeline-releases = Выпуски
+chosen-over = выбрано вместо:
