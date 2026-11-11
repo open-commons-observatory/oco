@@ -135,3 +135,4 @@ timeline-lead = Day by day: what the work produced, and what was done by hand to
 timeline-day = Day
 timeline-commits = Commits
 timeline-releases = Releases
+chosen-over = chosen over:
