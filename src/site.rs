@@ -410,7 +410,7 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
         }
         "heartbeat" => format!("{head}{}", made_by_work(data, fam, now_secs())),
         "vocabulary" => vocabulary_html(data, fam),
-        "handwork" => handwork_html(data, fam),
+        "manual_work" => handwork_html(data, fam),
         "research" => research_html(data, fam),
         // the signature view: the whole chain of the lens's subject on one page
         "essence" => {
@@ -1784,7 +1784,7 @@ const SUB_VIEWS: [(&str, &str); 8] = [
     ("-log", "⟦view-log⟧"),
     ("-ideas", "⟦view-ideas⟧"),
     ("-words", "⟦view-words⟧"),
-    ("-hand", "⟦view-hand⟧"),
+    ("-manual", "⟦view-hand⟧"),
     ("-research", "⟦view-research⟧"),
 ];
 
@@ -1864,9 +1864,9 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
             format!("{}{}", sub_nav(p, "-research"), research_html(data, &fam)),
         ),
         (
-            format!("{}-hand.html", p.slug),
+            format!("{}-manual.html", p.slug),
             format!("⟦view-hand⟧ · {}", p.title),
-            format!("{}{}", sub_nav(p, "-hand"), handwork_html(data, &fam)),
+            format!("{}{}", sub_nav(p, "-manual"), handwork_html(data, &fam)),
         ),
         (
             format!("{}-words.html", p.slug),
@@ -2217,7 +2217,7 @@ pub fn handwork_html(data: &Data, fam: &[String]) -> String {
             n(r, "count")
         }
     };
-    let mut rows = of(data, "handwork", fam);
+    let mut rows = of(data, "manual_work", fam);
     rows.sort_by_key(|r| std::cmp::Reverse(eff(r)));
     let max = rows.iter().map(|r| eff(r)).max().unwrap_or(1).max(1);
     let mut b = String::from(r#"<h1>⟦view-hand⟧</h1><p class="lead">⟦hand-lead⟧</p>"#);
@@ -2479,7 +2479,7 @@ pub fn attention_html(data: &Data) -> String {
     // projects by id, ranked by effort
     let mut sums: Vec<(String, String, i64, i64, Vec<String>)> = Vec::new();
     for r in data
-        .rows("handwork")
+        .rows("manual_work")
         .iter()
         .filter(|r| s(r, "status") != "automated")
     {
@@ -3160,7 +3160,7 @@ mod tests {
             [
                 "project-tad.html",
                 "project-tad-research.html",
-                "project-tad-hand.html",
+                "project-tad-manual.html",
                 "project-tad-words.html",
                 "project-tad-idea.html",
                 "project-tad-backlog.html",
@@ -3661,7 +3661,7 @@ mod tests {
     fn hand_work_ranks_by_effort_and_an_automated_one_never_asks() {
         let d = data(&[
             ("projects", "{\"id\":\"o/p\",\"name\":\"P\",\"kind\":\"tool\",\"parent\":\"x\"}\n{\"id\":\"o/q\",\"name\":\"Q\",\"kind\":\"tool\",\"parent\":\"x\"}"),
-            ("handwork", "{\"id\":\"box\",\"action\":\"carry the heavy box\",\"count\":2,\"minutes\":40,\"load\":9,\"effort\":72,\"status\":\"manual\",\"project\":\"o/p\"}\n{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":4,\"minutes\":12,\"load\":5,\"effort\":12,\"status\":\"manual\",\"project\":\"o/p\"}\n{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":2,\"minutes\":6,\"load\":5,\"effort\":6,\"status\":\"manual\",\"project\":\"o/q\"}\n{\"id\":\"rows\",\"action\":\"write rows by hand\",\"count\":24,\"effort\":24,\"status\":\"automated\",\"automated_by\":\"ocoeco note\",\"project\":\"o/p\"}"),
+            ("manual_work", "{\"id\":\"box\",\"action\":\"carry the heavy box\",\"count\":2,\"minutes\":40,\"load\":9,\"effort\":72,\"status\":\"manual\",\"project\":\"o/p\"}\n{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":4,\"minutes\":12,\"load\":5,\"effort\":12,\"status\":\"manual\",\"project\":\"o/p\"}\n{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":2,\"minutes\":6,\"load\":5,\"effort\":6,\"status\":\"manual\",\"project\":\"o/q\"}\n{\"id\":\"rows\",\"action\":\"write rows by hand\",\"count\":24,\"effort\":24,\"status\":\"automated\",\"automated_by\":\"ocoeco note\",\"project\":\"o/p\"}"),
         ]);
         let h = handwork_html(&d, &["o/p".to_string()]);
         assert!(
