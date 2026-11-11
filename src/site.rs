@@ -895,6 +895,7 @@ abbr.word{text-decoration:underline dotted;text-underline-offset:3px;cursor:help
 .tlc{display:flex;align-items:center;gap:8px}.tlbar{display:inline-block;height:8px;border-radius:4px;background:var(--mute);min-width:2px}.tlm{font-size:14px}@media(max-width:700px){.tl .tlrow{grid-template-columns:90px 1fr}}
 .grid td.s.reported{background:transparent;color:var(--fg)}.grid td.s.reported.good{box-shadow:inset 0 0 0 2px var(--good)}.grid td.s.reported.part{box-shadow:inset 0 0 0 2px var(--part)}.grid td.s.reported.bad{box-shadow:inset 0 0 0 2px var(--bad)}
 .grid td.s .rep{display:inline-block;margin-left:5px;padding:0 5px;border-radius:5px;background:var(--bg);color:var(--fg);font-size:11px}.reports-legend{font-size:13.5px;margin-top:10px}
+.loose-list{columns:2 340px;column-gap:28px;margin:0;padding-left:18px}.loose-list li{margin:0 0 7px;font-size:14.5px;break-inside:avoid}.attention.loose h2 small{font-size:15px;color:var(--mute);margin-left:6px}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -1220,7 +1221,7 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
         .iter()
         .filter(|r| s(r, "status") != "done")
         .count();
-    let attention = attention_html(data);
+    let attention = attention_html(data) + &loose_ends_html(data);
     let mut b = format!(
         r#"<h1>Open Commons Observatory</h1><p class="lead">⟦observatory-lead⟧</p>
 <div class="stats"><div class="stat"><b>{}</b><span>⟦stat-grand-projects⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-projects⟧</span></div><div class="stat"><b>{open}</b><span>⟦stat-open-items⟧</span></div><div class="stat"><b>{}</b><span>⟦stat-log-entries⟧</span></div></div>{attention}<h2>⟦grand-projects⟧</h2>"#,
@@ -2714,6 +2715,56 @@ pub fn attention_html(data: &Data) -> String {
     )
 }
 
+/// Work left in progress anywhere in the commons, oldest first - so wrapping up is read from the board,
+/// not remembered (2026-11-11: 25 items stood in progress, several finished long before and never closed).
+pub fn loose_ends_html(data: &Data) -> String {
+    let page: std::collections::HashMap<String, String> = subs(data)
+        .into_iter()
+        .map(|p| (p.id.clone(), p.slug.clone()))
+        .collect();
+    let name = |id: &str| {
+        let t = data
+            .rows("projects")
+            .iter()
+            .find(|p| s(p, "id") == id)
+            .map(|p| first(p, &["title", "name"]))
+            .unwrap_or_else(|| id.to_string());
+        match page.get(id) {
+            Some(sl) => format!(r#"<a href="{}.html">{}</a>"#, sl, esc(&t)),
+            None => esc(&t),
+        }
+    };
+    let mut items: Vec<&Row> = data
+        .rows("backlog")
+        .iter()
+        .filter(|r| s(r, "status") == "in-progress")
+        .collect();
+    if items.is_empty() {
+        return String::new();
+    }
+    items.sort_by_key(|r| s(r, "opened"));
+    let li: String = items
+        .iter()
+        .map(|r| {
+            let opened = s(r, "opened");
+            let since = if opened.is_empty() {
+                String::new()
+            } else {
+                format!(r#" <span class="mute">⟦since⟧ {}</span>"#, esc(&opened))
+            };
+            format!(
+                "<li>{} · {}{since}</li>",
+                name(&s(r, "project")),
+                esc(&s(r, "title"))
+            )
+        })
+        .collect();
+    format!(
+        r#"<section class="attention loose"><h2>⟦loose-ends⟧ <small>{}</small></h2><p class="lead">⟦loose-ends-lead⟧</p><ul class="loose-list">{li}</ul></section>"#,
+        items.len()
+    )
+}
+
 /// How completely a project tells its essence - why, what, how, now - by one rule, wherever it is
 /// shown: its idea is written; its path is set; every step has something that serves it; its work shows.
 pub fn told(data: &Data, fam: &[String], idea_of: &str, ms: &[Milestone]) -> [bool; 4] {
@@ -4030,6 +4081,28 @@ mod tests {
             table("Part", &lines, &cols, &cells),
             table_with("Part", &lines, &cols, &cells, &Cells::new()),
             "no reports, the table as before"
+        );
+    }
+
+    #[test]
+    fn loose_ends_are_everything_in_progress_oldest_first() {
+        let d = data(&[
+            ("projects", "{\"id\":\"o/p\",\"name\":\"P\",\"kind\":\"tool\",\"parent\":\"x\"}"),
+            ("backlog", "{\"id\":\"b\",\"title\":\"Newer\",\"status\":\"in-progress\",\"opened\":\"2026-11-10\",\"project\":\"o/p\"}\n{\"id\":\"a\",\"title\":\"Older\",\"status\":\"in-progress\",\"opened\":\"2026-10-01\",\"project\":\"o/p\"}\n{\"id\":\"c\",\"title\":\"Finished\",\"status\":\"done\",\"project\":\"o/p\"}"),
+        ]);
+        let h = loose_ends_html(&d);
+        assert!(
+            h.find("Older").unwrap() < h.find("Newer").unwrap(),
+            "oldest first"
+        );
+        assert!(
+            !h.contains("Finished") && h.contains("<small>2</small>"),
+            "{h}"
+        );
+        assert_eq!(
+            loose_ends_html(&data(&[])),
+            "",
+            "nothing loose, nothing drawn"
         );
     }
 }

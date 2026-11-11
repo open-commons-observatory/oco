@@ -137,3 +137,6 @@ timeline-commits = Commits
 timeline-releases = Releases
 chosen-over = chosen over:
 reports-legend = Outlined cells are reported by others and not confirmed by our checks; where a cell holds two marks, the first is ours and the second the report. Compared in:
+loose-ends = Loose ends
+loose-ends-lead = Everything left in progress anywhere, oldest first. Settle each: done, open with its next step, or parked with a reason.
+since = since
