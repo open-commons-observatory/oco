@@ -2095,6 +2095,14 @@ pub fn told(data: &Data, fam: &[String], idea_of: &str, ms: &[Milestone]) -> [bo
     ]
 }
 
+/// What kind of thing a working is, as a word from the catalog; an unknown kind is shown as written.
+fn kind_word(kind: &str) -> String {
+    match kind {
+        "tool" | "check" | "gatherer" | "test" | "practice" => format!("⟦working-{kind}⟧"),
+        other => esc(other),
+    }
+}
+
 /// The four marks, small, for a card.
 fn tells(marks: [bool; 4]) -> String {
     let mut b = String::from(r#"<p class="tells">"#);
@@ -2170,7 +2178,7 @@ pub fn essence_html(
     } else {
         let _ = write!(
             b,
-            r#"<div class="pathbox">{}</div><p class="work"><b>{done} of {}</b> ⟦milestones-done⟧</p>"#,
+            r#"<div class="pathbox">{}</div><p class="work"><b>{done} / {}</b> ⟦milestones-done⟧</p>"#,
             path_view(&rated),
             rated.len()
         );
@@ -2210,7 +2218,7 @@ pub fn essence_html(
                 b,
                 r#"<div class="working"><b>{}</b><span class="chip">{}</span>{link}<p>{}</p><p class="why">{}</p></div>"#,
                 esc(&s(w, "what")),
-                esc(&s(w, "kind")),
+                kind_word(&s(w, "kind")),
                 esc(&s(w, "how")),
                 esc(&s(w, "why"))
             );
@@ -2713,7 +2721,7 @@ mod tests {
             ]
         );
         assert!(
-            pages[0].2.contains("<b>1 of 1</b> ⟦milestones-done⟧"),
+            pages[0].2.contains("<b>1 / 1</b> ⟦milestones-done⟧"),
             "its milestone is done by its backlog"
         );
         assert!(pages[0]
@@ -3120,5 +3128,18 @@ mod tests {
             !card.contains(" projects<"),
             "no English word outside the catalog: {card}"
         );
+    }
+
+    #[test]
+    fn a_working_says_its_kind_in_the_readers_language() {
+        assert_eq!(kind_word("check"), "⟦working-check⟧");
+        assert_eq!(
+            kind_word("<odd>"),
+            "&lt;odd&gt;",
+            "an unknown kind is shown as written, made safe"
+        );
+        crate::i18n::set("ru");
+        assert_eq!(localize(&kind_word("gatherer")), "сборщик");
+        crate::i18n::set("en");
     }
 }

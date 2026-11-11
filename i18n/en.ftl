@@ -98,3 +98,8 @@ card-projects = { $count ->
     [one] { $count } project
    *[other] { $count } projects
 }
+working-tool = tool
+working-check = check
+working-gatherer = gatherer
+working-test = test
+working-practice = practice
