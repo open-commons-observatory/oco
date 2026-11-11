@@ -2193,15 +2193,17 @@ pub fn vocabulary_html(data: &Data, fam: &[String]) -> String {
             .filter(|x| !x.is_empty())
         {
             if let Some(d) = data.rows("decisions").iter().find(|d| s(d, "id") == id) {
+                // on a word, the telling part is what it was chosen over; the decision and its why on hover
+                let rejected = s(d, "rejected");
+                let text = if rejected.is_empty() {
+                    esc(&cut(&s(d, "decision"), 70))
+                } else {
+                    format!("⟦chosen-over⟧ {}", esc(&cut(&rejected, 90)))
+                };
                 let _ = write!(
                     c,
-                    r#"<div class="decided"><span class="badge" title="{}">{}</span></div>"#,
-                    esc(&format!(
-                        "{} - ⟦rejected⟧ {}",
-                        s(d, "why"),
-                        s(d, "rejected")
-                    )),
-                    esc(&cut(&s(d, "decision"), 70))
+                    r#"<div class="decided"><span class="badge" title="{}">{text}</span></div>"#,
+                    esc(&format!("{} - {}", s(d, "decision"), s(d, "why")))
                 );
             }
         }
@@ -3858,8 +3860,8 @@ mod tests {
         ]);
         let h = vocabulary_html(&d, &["o/p".to_string()]);
         assert!(
-            h.contains("A grand view is a lens.")
-                && h.contains("you look through it - ⟦rejected⟧ view"),
+            h.contains("⟦chosen-over⟧ view")
+                && h.contains("A grand view is a lens. - you look through it"),
             "{h}"
         );
     }
