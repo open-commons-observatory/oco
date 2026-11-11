@@ -1906,26 +1906,23 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
 const HOME: &str = "open-commons-observatory/";
 
 fn family_bar(data: &Data, here: &str) -> String {
+    let on = |yes: bool| if yes { r#" class="on""# } else { "" };
     let mut x = String::from(r#"<div class="psub"><b>⟦nav-observatory⟧</b>"#);
     let _ = write!(
         x,
         r#"<a href="index.html"{}>⟦overview⟧</a>"#,
-        if here == "index.html" {
-            r#" class="on""#
-        } else {
-            ""
-        }
+        on(here == "index.html")
     );
     for p in subs(data).iter().filter(|p| p.id.starts_with(HOME)) {
+        // a page is a project's when it is one of its own pages - not when its name begins with the slug
+        let mine = SUB_VIEWS
+            .iter()
+            .any(|(suffix, _)| here == format!("{}{}.html", p.slug, suffix));
         let _ = write!(
             x,
             r#"<a href="{}.html"{}>{}</a>"#,
             p.slug,
-            if here.starts_with(&p.slug) {
-                r#" class="on""#
-            } else {
-                ""
-            },
+            on(mine),
             esc(&p.title)
         );
     }
@@ -3863,6 +3860,25 @@ mod tests {
             h.contains("⟦chosen-over⟧ view")
                 && h.contains("A grand view is a lens. - you look through it"),
             "{h}"
+        );
+    }
+
+    #[test]
+    fn the_family_bar_marks_only_the_project_whose_page_it_is() {
+        let d = data(&[
+            ("projects", "{\"id\":\"open-commons-observatory/ocoeco\",\"name\":\"ocoeco\",\"kind\":\"tool\",\"parent\":\"open-commons-observatory\"}\n{\"id\":\"open-commons-observatory/ocoeco-engine\",\"name\":\"ocoeco-engine\",\"kind\":\"tool\",\"parent\":\"open-commons-observatory\"}"),
+            ("milestones", "{\"id\":\"a\",\"subject\":\"x\",\"ord\":1,\"title\":\"A\",\"horizon\":\"working\",\"readiness\":1,\"criteria\":\"\",\"why\":\"\",\"project\":\"open-commons-observatory/ocoeco\"}\n{\"id\":\"b\",\"subject\":\"y\",\"ord\":1,\"title\":\"B\",\"horizon\":\"working\",\"readiness\":1,\"criteria\":\"\",\"why\":\"\",\"project\":\"open-commons-observatory/ocoeco-engine\"}"),
+        ]);
+        let engine = subs(&d)
+            .iter()
+            .map(|p| p.slug.clone())
+            .find(|s| s.ends_with("engine"))
+            .expect("the engine has a page");
+        let bar = family_bar(&d, &format!("{engine}-manual.html"));
+        assert_eq!(
+            bar.matches(r#"class="on""#).count(),
+            1,
+            "one name beginning with another marks only its own page: {bar}"
         );
     }
 }
