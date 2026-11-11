@@ -10,6 +10,7 @@ order = 3
 parent = "open-commons-observatory"
 
 [exports]
+handwork = "oco-data/handwork.json"
 translations = "oco-data/translations.json"
 workings = "oco-data/workings.json"
 idea = "oco-data/idea.json"
