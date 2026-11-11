@@ -93,6 +93,17 @@ mod tests {
         assert_eq!(tn("commits-90", 2), "2 коммита за последние 90 дней");
         assert_eq!(tn("commits-90", 5), "5 коммитов за последние 90 дней");
         assert_eq!(tn("commits-90", 21), "21 коммит за последние 90 дней");
+        assert_eq!(
+            [1, 2, 5, 11, 21, 22].map(|n| tn("card-projects", n)),
+            [
+                "1 проект",
+                "2 проекта",
+                "5 проектов",
+                "11 проектов",
+                "21 проект",
+                "22 проекта"
+            ]
+        );
         set("en");
         assert_eq!(tn("commits-90", 1), "1 commit in the last 90 days");
         assert_eq!(tn("commits-90", 103), "103 commits in the last 90 days");

@@ -94,5 +94,10 @@ card-features-work = возможностей точно работают на
 card-partly = частично
 card-missing = отсутствуют
 card-to-measure = ещё предстоит измерить
-card-projects = проектов
 card-readiness = готовность
+card-projects = { $count ->
+    [one] { $count } проект
+    [few] { $count } проекта
+    [many] { $count } проектов
+   *[other] { $count } проекта
+}
