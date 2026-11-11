@@ -410,6 +410,7 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
         }
         "heartbeat" => format!("{head}{}", made_by_work(data, fam, now_secs())),
         "vocabulary" => vocabulary_html(data, fam),
+        "handwork" => handwork_html(data, fam),
         // the signature view: the whole chain of the lens's subject on one page
         "essence" => {
             let subject = Some(k("subject"))
@@ -798,6 +799,9 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 abbr.word{text-decoration:underline dotted;text-underline-offset:3px;cursor:help}dfn{font-style:normal}
 .attention{background:var(--soft);border-radius:16px;padding:18px 22px 8px;margin:26px 0 34px}.attention h2{margin-top:0}.attn{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
 .attn h3{font-size:15px;margin:0 0 8px}.attn ul{margin:0;padding-left:18px}.attn li{margin:0 0 7px;font-size:14.5px}
+.hand .hrow{display:grid;grid-template-columns:minmax(200px,1fr) minmax(80px,220px) 56px auto;gap:14px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.hbarbox{display:block;background:var(--soft);border-radius:4px;height:8px}.hbar{display:block;height:8px;border-radius:4px;background:var(--mute)}.hbar.manual{background:var(--accent)}.hbar.automated{background:var(--good)}
+.hrow.sat .hact{font-weight:600}.chip.warn{border-color:var(--accent);color:var(--accent)}@media(max-width:640px){.hand .hrow{grid-template-columns:1fr 56px}.hand .hbarbox,.hand .hrow .chip:last-child{display:none}}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -1770,13 +1774,14 @@ pub fn subs(data: &Data) -> Vec<Sub> {
         .collect()
 }
 
-const SUB_VIEWS: [(&str, &str); 6] = [
+const SUB_VIEWS: [(&str, &str); 7] = [
     ("", "⟦view-essence⟧"),
     ("-idea", "⟦view-idea⟧"),
     ("-backlog", "⟦view-backlog⟧"),
     ("-log", "⟦view-log⟧"),
     ("-ideas", "⟦view-ideas⟧"),
     ("-words", "⟦view-words⟧"),
+    ("-hand", "⟦view-hand⟧"),
 ];
 
 fn sub_nav(p: &Sub, here: &str) -> String {
@@ -1849,6 +1854,11 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
     ideas.push_str("</div>");
     vec![
         (format!("{}.html", p.slug), p.title.clone(), how),
+        (
+            format!("{}-hand.html", p.slug),
+            format!("⟦view-hand⟧ · {}", p.title),
+            format!("{}{}", sub_nav(p, "-hand"), handwork_html(data, &fam)),
+        ),
         (
             format!("{}-words.html", p.slug),
             format!("⟦view-words⟧ · {}", p.title),
@@ -2187,6 +2197,45 @@ pub fn vocabulary_html(data: &Data, fam: &[String]) -> String {
     b + "</div>"
 }
 
+/// The small actions a project does by hand, and how often - as bars. Past three, a manual one is
+/// saturated and asks for a tool; an automated one names its tool; a deliberate one only counts.
+pub fn handwork_html(data: &Data, fam: &[String]) -> String {
+    let mut rows = of(data, "handwork", fam);
+    rows.sort_by_key(|r| std::cmp::Reverse(n(r, "count")));
+    let max = rows.iter().map(|r| n(r, "count")).max().unwrap_or(1).max(1);
+    let mut b = String::from(r#"<h1>⟦view-hand⟧</h1><p class="lead">⟦hand-lead⟧</p>"#);
+    if rows.is_empty() {
+        return b + r#"<p class="mute">⟦attention-none⟧</p>"#;
+    }
+    b.push_str(r#"<div class="hand">"#);
+    for r in rows {
+        let (c, st, by) = (n(r, "count"), s(r, "status"), s(r, "automated_by"));
+        let kind = match st.as_str() {
+            "manual" | "automated" | "deliberate" => st.clone(),
+            _ => "manual".to_string(),
+        };
+        let sat = kind == "manual" && c >= 3;
+        let _ = write!(
+            b,
+            r#"<div class="hrow{}"><span class="hact">{}{}</span><span class="hbarbox"><span class="hbar {kind}" style="width:{}%"></span></span><b>{c}×</b><span class="chip">⟦hand-status-{kind}⟧{}</span></div>"#,
+            if sat { " sat" } else { "" },
+            esc(&s(r, "action")),
+            if sat {
+                r#" <span class="chip warn">⟦hand-worth⟧</span>"#
+            } else {
+                ""
+            },
+            (c * 100 / max).max(3),
+            if by.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", esc(&by))
+            }
+        );
+    }
+    b + "</div>"
+}
+
 /// Where the whole is weakest right now, read from every project's data: what waits on a person,
 /// steps that nothing delivers, and work that has gone quiet. Read before choosing the next piece.
 pub fn attention_html(data: &Data) -> String {
@@ -2300,11 +2349,51 @@ pub fn attention_html(data: &Data) -> String {
             ));
         }
     }
+    // hand-work worth a tool: manual actions past three, summed across projects, by the time they cost
+    let mut sums: Vec<(String, String, i64, i64, Vec<String>)> = Vec::new();
+    for r in data
+        .rows("handwork")
+        .iter()
+        .filter(|r| s(r, "status") == "manual")
+    {
+        let (id, c) = (s(r, "id"), n(r, "count"));
+        match sums.iter_mut().find(|x| x.0 == id) {
+            Some(x) => {
+                x.2 += c;
+                x.4.push(s(r, "project"));
+            }
+            None => sums.push((
+                id,
+                s(r, "action"),
+                c,
+                n(r, "minutes"),
+                vec![s(r, "project")],
+            )),
+        }
+    }
+    sums.retain(|x| x.2 >= 3);
+    sums.sort_by_key(|x| std::cmp::Reverse(x.2 * x.3.max(1)));
+    let hand: Vec<String> = sums
+        .iter()
+        .map(|(_, a, c, m, ps)| {
+            let cost = if *m > 0 {
+                format!(" · ~{} ⟦minutes⟧", c * m)
+            } else {
+                String::new()
+            };
+            format!(
+                "{} · {c}×{cost} · {}",
+                esc(a),
+                ps.iter().map(|p| name(p)).collect::<Vec<_>>().join(", ")
+            )
+        })
+        .collect();
     format!(
-        r#"<section class="attention"><h2>⟦attention⟧</h2><p class="lead">⟦attention-lead⟧</p><div class="attn"><div><h3>⟦attention-waits⟧</h3>{}</div><div><h3>⟦attention-unserved⟧</h3>{}</div><div><h3>⟦attention-quiet⟧</h3>{}</div></div></section>"#,
+        r#"<section class="attention"><h2>⟦attention⟧</h2><p class="lead">⟦attention-lead⟧</p><div class="attn"><div><h3>⟦attention-waits⟧</h3>{}</div><div><h3>⟦attention-unserved⟧</h3>{}</div><div><h3>⟦attention-quiet⟧</h3>{}</div><div><h3>⟦attention-hand⟧</h3>{}</div></div></section>"#,
         list(waiting),
         list(unserved.into_iter().map(|(_, x)| x).collect()),
-        list(quiet)
+        list(quiet),
+        list(hand)
     )
 }
 
@@ -2947,6 +3036,7 @@ mod tests {
             pages.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),
             [
                 "project-tad.html",
+                "project-tad-hand.html",
                 "project-tad-words.html",
                 "project-tad-idea.html",
                 "project-tad-backlog.html",
@@ -3440,6 +3530,34 @@ mod tests {
         assert!(
             !p.contains("last commit"),
             "not gathered yet is unknown, not quiet"
+        );
+    }
+
+    #[test]
+    fn hand_work_shows_what_is_saturated_and_what_a_tool_replaced() {
+        let d = data(&[
+            ("projects", "{\"id\":\"o/p\",\"name\":\"P\",\"kind\":\"tool\",\"parent\":\"x\"}\n{\"id\":\"o/q\",\"name\":\"Q\",\"kind\":\"tool\",\"parent\":\"x\"}"),
+            ("handwork", "{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":4,\"status\":\"manual\",\"minutes\":3,\"project\":\"o/p\"}\n{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":2,\"status\":\"manual\",\"project\":\"o/q\"}\n{\"id\":\"rows\",\"action\":\"write rows by hand\",\"count\":24,\"status\":\"automated\",\"automated_by\":\"ocoeco note\",\"project\":\"o/p\"}\n{\"id\":\"look\",\"action\":\"look at a page\",\"count\":9,\"status\":\"deliberate\",\"project\":\"o/p\"}"),
+        ]);
+        let h = handwork_html(&d, &["o/p".to_string()]);
+        assert!(
+            h.find("write rows by hand").unwrap() < h.find("patch source by text").unwrap(),
+            "by count"
+        );
+        assert_eq!(
+            h.matches("hand-worth").count(),
+            1,
+            "only the manual one past three asks for a tool"
+        );
+        assert!(h.contains("· ocoeco note") && h.contains("hand-status-deliberate"));
+        let a = attention_html(&d);
+        assert!(
+            a.contains("patch source by text · 6×"),
+            "summed across projects: {a}"
+        );
+        assert!(
+            !a.contains("look at a page") && !a.contains("write rows by hand"),
+            "deliberate and automated never ask"
         );
     }
 }
