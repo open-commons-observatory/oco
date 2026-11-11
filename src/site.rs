@@ -1075,9 +1075,9 @@ fn grand_overview_card(data: &Data, g: &Grand) -> String {
     let line = match cols.iter().find(|c| c.kind == "linux") {
         Some(l) => {
             let [w, p, m, u] = tally(&cells, &ids, &l.id);
-            format!("{w} of {} features known to work on {}, {p} partly, {m} missing, {u} still to measure", ids.len(), l.name)
+            format!("{w} / {} ⟦card-features-work⟧ {}, {p} ⟦card-partly⟧, {m} ⟦card-missing⟧, {u} ⟦card-to-measure⟧ · ", ids.len(), l.name)
         }
-        None => format!("{} projects", fam.len()),
+        None => String::new(),
     };
     let ms: Vec<Milestone> = milestones_of(&of(data, "milestones", &fam))
         .into_iter()
@@ -1100,7 +1100,7 @@ fn grand_overview_card(data: &Data, g: &Grand) -> String {
         path_view(&rated)
     };
     format!(
-        r#"<a class="grand" href="{}/index.html"><h3>{}</h3><p>{}</p>{path}<p>{} · {} projects</p></a>"#,
+        r#"<a class="grand" href="{}/index.html"><h3>{}</h3><p>{}</p>{path}<p>{}{} ⟦card-projects⟧</p></a>"#,
         g.slug,
         esc(&g.title),
         esc(&g.goal),
@@ -1149,7 +1149,7 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
             let done = rated.iter().filter(|(_, e)| e.state() == "done").count();
             let _ = write!(
                 b,
-                r#"<a class="grand" href="{}.html"><h3>{}</h3><p>{}</p>{}<p>{done} of {} milestones done · readiness {} of 9</p>{}</a>"#,
+                r#"<a class="grand" href="{}.html"><h3>{}</h3><p>{}</p>{}<p>{done} / {} ⟦milestones-done⟧ · ⟦card-readiness⟧ {} / 9</p>{}</a>"#,
                 p.slug,
                 esc(&p.title),
                 esc(&p.goal),
@@ -3090,5 +3090,32 @@ mod tests {
         let small = tells([true, false, false, true]);
         assert_eq!(small.matches(r#"class="on""#).count(), 2);
         assert!(small.contains("○ ⟦tell-how⟧"));
+    }
+
+    #[test]
+    fn a_grand_card_counts_its_projects_once_and_in_words_from_the_catalog() {
+        let d = data(&[(
+            "projects",
+            "{\"id\":\"o/p\",\"name\":\"P\",\"kind\":\"tool\",\"parent\":\"x\"}",
+        )]);
+        let g = Grand {
+            id: "g".into(),
+            title: "g".into(),
+            goal: "g".into(),
+            slug: "g".into(),
+            owner: "g".into(),
+            owners: vec![],
+            members: vec!["o/p".into()],
+            curated: true,
+            order: 0,
+            views: vec![],
+            lens: Value::Null,
+        };
+        let card = grand_overview_card(&d, &g);
+        assert_eq!(card.matches("⟦card-projects⟧").count(), 1, "{card}");
+        assert!(
+            !card.contains(" projects<"),
+            "no English word outside the catalog: {card}"
+        );
     }
 }
