@@ -790,6 +790,7 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 .by{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}.working{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .working b{display:block;margin-bottom:6px}.working p{margin:8px 0 0;font-size:14.5px}.working .why{color:var(--mute)}
 @media(max-width:820px){.serve{grid-template-columns:1fr}.flow{margin-left:8px;padding-left:28px}.step::before{left:-49px}}
+.tells{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 0;font-size:12.5px}.tells .on{color:var(--good)}.tells .off{color:var(--mute)}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -1143,20 +1144,19 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
         }
         let _ = write!(b, "<h2>{heading}</h2>");
         for p in group {
-            let rated = rate(
-                data,
-                &milestones_of(&of(data, "milestones", std::slice::from_ref(&p.id))),
-            );
+            let ms = milestones_of(&of(data, "milestones", std::slice::from_ref(&p.id)));
+            let rated = rate(data, &ms);
             let done = rated.iter().filter(|(_, e)| e.state() == "done").count();
             let _ = write!(
                 b,
-                r#"<a class="grand" href="{}.html"><h3>{}</h3><p>{}</p>{}<p>{done} of {} milestones done · readiness {} of 9</p></a>"#,
+                r#"<a class="grand" href="{}.html"><h3>{}</h3><p>{}</p>{}<p>{done} of {} milestones done · readiness {} of 9</p>{}</a>"#,
                 p.slug,
                 esc(&p.title),
                 esc(&p.goal),
                 path_view(&rated),
                 rated.len(),
-                readiness(&rated)
+                readiness(&rated),
+                tells(told(data, std::slice::from_ref(&p.id), &p.id, &ms))
             );
         }
     }
@@ -1167,7 +1167,24 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
             parents.push(s(p, "parent"));
         }
     }
-    b.push_str("<h2>⟦every-project⟧</h2>");
+    let marks_of = |p: &Row| {
+        let pid = s(p, "id");
+        told(
+            data,
+            std::slice::from_ref(&pid),
+            &pid,
+            &milestones_of(&of(data, "milestones", std::slice::from_ref(&pid))),
+        )
+    };
+    let whole = projects
+        .iter()
+        .filter(|p| marks_of(p).iter().all(|t| *t))
+        .count();
+    let _ = write!(
+        b,
+        r#"<h2>⟦every-project⟧</h2><p class="lead">{whole} / {} ⟦tell-their-whole-essence⟧</p>"#,
+        projects.len()
+    );
     for par in parents.iter().filter(|p| !ids.contains(p)) {
         let _ = write!(b, "<h3>{}</h3><div class=\"cards\">", esc(par));
         for p in projects.iter().filter(|p| s(p, "parent") == *par) {
@@ -1178,11 +1195,12 @@ fn observatory(data: &Data, grands: &[Grand]) -> String {
                 .unwrap_or(0);
             let _ = write!(
                 b,
-                r#"<div class="card"><h4><a href="{}">{}</a></h4><span class="chip">{}</span><span class="chip">{tables} shared tables</span><p>{}</p></div>"#,
+                r#"<div class="card"><h4><a href="{}">{}</a></h4><span class="chip">{}</span><span class="chip">{tables} shared tables</span><p>{}</p>{}</div>"#,
                 esc(&s(p, "link")),
                 esc(&s(p, "name")),
                 esc(&s(p, "kind")),
-                esc(&s(p, "id"))
+                esc(&s(p, "id")),
+                tells(marks_of(p))
             );
         }
         b.push_str("</div>");
@@ -2057,6 +2075,43 @@ pub fn idea_html(rows: &[&Row]) -> String {
     b + "</article>"
 }
 
+/// How completely a project tells its essence - why, what, how, now - by one rule, wherever it is
+/// shown: its idea is written; its path is set; every step has something that serves it; its work shows.
+pub fn told(data: &Data, fam: &[String], idea_of: &str, ms: &[Milestone]) -> [bool; 4] {
+    let whose = [idea_of.to_string()];
+    let workings = of(data, "workings", fam);
+    let served = ms
+        .iter()
+        .filter(|m| workings.iter().any(|w| s(w, "serves") == m.id))
+        .count();
+    let work = ["backlog", "session_log", "activity"]
+        .iter()
+        .any(|t| !of(data, t, fam).is_empty());
+    [
+        !of(data, "idea", &whose).is_empty(),
+        !ms.is_empty(),
+        !ms.is_empty() && served == ms.len(),
+        work,
+    ]
+}
+
+/// The four marks, small, for a card.
+fn tells(marks: [bool; 4]) -> String {
+    let mut b = String::from(r#"<p class="tells">"#);
+    for (ok, label) in marks
+        .iter()
+        .zip(["⟦tell-why⟧", "⟦tell-what⟧", "⟦tell-how⟧", "⟦tell-now⟧"])
+    {
+        let _ = write!(
+            b,
+            r#"<span class="{}">{} {label}</span>"#,
+            if *ok { "on" } else { "off" },
+            if *ok { "✓" } else { "○" }
+        );
+    }
+    b + "</p>"
+}
+
 /// Essence - the signature view: a project's whole chain on one page, each part flowing into the next.
 /// Why it exists (the opening of its own idea) leads to what it must reach (its path); each step
 /// stands with how it is delivered and proven (the workings that serve it - or, plainly, nothing
@@ -2075,20 +2130,17 @@ pub fn essence_html(
     let mut idea_rows = of(data, "idea", &whose);
     idea_rows.sort_by_key(|r| n(r, "ord"));
     let workings = of(data, "workings", fam);
-    let served = ms
-        .iter()
-        .filter(|m| workings.iter().any(|w| s(w, "serves") == m.id))
-        .count();
     let work = made_by_work(data, fam, now_secs());
     let doing: Vec<&Row> = of(data, "backlog", fam)
         .into_iter()
         .filter(|r| s(r, "status") == "in-progress")
         .collect();
+    let marks = told(data, fam, idea_of, ms);
     let told = [
-        (!idea_rows.is_empty(), "⟦essence-why⟧"),
-        (!ms.is_empty(), "⟦essence-what⟧"),
-        (!ms.is_empty() && served == ms.len(), "⟦essence-how⟧"),
-        (!work.is_empty() || !doing.is_empty(), "⟦essence-now⟧"),
+        (marks[0], "⟦essence-why⟧"),
+        (marks[1], "⟦essence-what⟧"),
+        (marks[2], "⟦essence-how⟧"),
+        (marks[3], "⟦essence-now⟧"),
     ];
     let mut b = format!(
         r#"<h1>{}</h1><p class="lead">{}</p><div class="told">"#,
@@ -3012,5 +3064,31 @@ mod tests {
             1,
             "not reached, and nothing serves it"
         );
+    }
+
+    #[test]
+    fn the_four_marks_follow_one_rule() {
+        let d = data(&[
+            ("idea", "{\"id\":\"1\",\"ord\":1,\"kind\":\"lead\",\"text\":\"Why.\",\"project\":\"o/p\"}"),
+            ("milestones", "{\"id\":\"m1\",\"subject\":\"p\",\"ord\":1,\"title\":\"A\",\"horizon\":\"working\",\"readiness\":3,\"criteria\":\"backlog:a\",\"why\":\"\",\"project\":\"o/p\"}\n{\"id\":\"m2\",\"subject\":\"p\",\"ord\":2,\"title\":\"B\",\"horizon\":\"working\",\"readiness\":5,\"criteria\":\"backlog:b\",\"why\":\"\",\"project\":\"o/p\"}"),
+            ("workings", "{\"id\":\"w\",\"what\":\"T\",\"kind\":\"tool\",\"serves\":\"m1\",\"how\":\"\",\"why\":\"\",\"uses\":\"\",\"project\":\"o/p\"}"),
+            ("backlog", "{\"id\":\"a\",\"status\":\"done\",\"project\":\"o/p\"}"),
+        ]);
+        let fam = vec!["o/p".to_string()];
+        let ms = milestones_of(&of(&d, "milestones", &fam));
+        assert_eq!(
+            told(&d, &fam, "o/p", &ms),
+            [true, true, false, true],
+            "one step has nothing serving it"
+        );
+        assert_eq!(told(&d, &fam, "o/p", &ms[..1]), [true, true, true, true]);
+        assert_eq!(
+            told(&d, &["o/other".to_string()], "o/other", &[]),
+            [false, false, false, false],
+            "a project that tells nothing"
+        );
+        let small = tells([true, false, false, true]);
+        assert_eq!(small.matches(r#"class="on""#).count(), 2);
+        assert!(small.contains("○ ⟦tell-how⟧"));
     }
 }
