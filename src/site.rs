@@ -411,6 +411,7 @@ pub fn lens_view(data: &Data, g: &Grand, fam: &[String], v: &Value, status_legen
         "heartbeat" => format!("{head}{}", made_by_work(data, fam, now_secs())),
         "vocabulary" => vocabulary_html(data, fam),
         "handwork" => handwork_html(data, fam),
+        "research" => research_html(data, fam),
         // the signature view: the whole chain of the lens's subject on one page
         "essence" => {
             let subject = Some(k("subject"))
@@ -799,9 +800,11 @@ svg.spark{display:block;margin:6px 0 2px}svg.spark .busy{fill:var(--good)}svg.sp
 abbr.word{text-decoration:underline dotted;text-underline-offset:3px;cursor:help}dfn{font-style:normal}
 .attention{background:var(--soft);border-radius:16px;padding:18px 22px 8px;margin:26px 0 34px}.attention h2{margin-top:0}.attn{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
 .attn h3{font-size:15px;margin:0 0 8px}.attn ul{margin:0;padding-left:18px}.attn li{margin:0 0 7px;font-size:14.5px}
-.hand .hrow{display:grid;grid-template-columns:minmax(200px,1fr) minmax(80px,220px) 56px auto;gap:14px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.hand .hrow{display:grid;grid-template-columns:minmax(200px,1fr) minmax(80px,200px) 210px 190px;gap:14px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
 .hbarbox{display:block;background:var(--soft);border-radius:4px;height:8px}.hbar{display:block;height:8px;border-radius:4px;background:var(--mute)}.hbar.manual{background:var(--accent)}.hbar.automated{background:var(--good)}
 .hrow.sat .hact{font-weight:600}.chip.warn{border-color:var(--accent);color:var(--accent)}@media(max-width:640px){.hand .hrow{grid-template-columns:1fr 56px}.hand .hbarbox,.hand .hrow .chip:last-child{display:none}}
+.hnum{font-size:13.5px;color:var(--mute)}.hnum b{color:var(--fg)}.decided{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.badge{font-size:12.5px;padding:3px 10px;border-radius:99px;background:var(--soft);border:1px solid var(--line);cursor:help}
+.badge .rests{margin-left:6px;padding:0 6px;border-radius:99px;background:var(--accent);color:var(--bg);font-size:11px}.research .sources{font-size:14px;padding-left:18px;margin:8px 0}.research .sources li{margin:4px 0}
 footer{border-top:1px solid var(--line);color:var(--mute);font-size:14px;padding:28px 0}
 "#;
 
@@ -1774,7 +1777,7 @@ pub fn subs(data: &Data) -> Vec<Sub> {
         .collect()
 }
 
-const SUB_VIEWS: [(&str, &str); 7] = [
+const SUB_VIEWS: [(&str, &str); 8] = [
     ("", "⟦view-essence⟧"),
     ("-idea", "⟦view-idea⟧"),
     ("-backlog", "⟦view-backlog⟧"),
@@ -1782,6 +1785,7 @@ const SUB_VIEWS: [(&str, &str); 7] = [
     ("-ideas", "⟦view-ideas⟧"),
     ("-words", "⟦view-words⟧"),
     ("-hand", "⟦view-hand⟧"),
+    ("-research", "⟦view-research⟧"),
 ];
 
 fn sub_nav(p: &Sub, here: &str) -> String {
@@ -1854,6 +1858,11 @@ pub fn sub_pages(data: &Data, p: &Sub) -> Vec<(String, String, String)> {
     ideas.push_str("</div>");
     vec![
         (format!("{}.html", p.slug), p.title.clone(), how),
+        (
+            format!("{}-research.html", p.slug),
+            format!("⟦view-research⟧ · {}", p.title),
+            format!("{}{}", sub_nav(p, "-research"), research_html(data, &fam)),
+        ),
         (
             format!("{}-hand.html", p.slug),
             format!("⟦view-hand⟧ · {}", p.title),
@@ -2200,24 +2209,39 @@ pub fn vocabulary_html(data: &Data, fam: &[String]) -> String {
 /// The small actions a project does by hand, and how often - as bars. Past three, a manual one is
 /// saturated and asks for a tool; an automated one names its tool; a deliberate one only counts.
 pub fn handwork_html(data: &Data, fam: &[String]) -> String {
+    // effort where it was recorded, the count where it was not yet
+    let eff = |r: &Row| {
+        if n(r, "effort") > 0 {
+            n(r, "effort")
+        } else {
+            n(r, "count")
+        }
+    };
     let mut rows = of(data, "handwork", fam);
-    rows.sort_by_key(|r| std::cmp::Reverse(n(r, "count")));
-    let max = rows.iter().map(|r| n(r, "count")).max().unwrap_or(1).max(1);
+    rows.sort_by_key(|r| std::cmp::Reverse(eff(r)));
+    let max = rows.iter().map(|r| eff(r)).max().unwrap_or(1).max(1);
     let mut b = String::from(r#"<h1>⟦view-hand⟧</h1><p class="lead">⟦hand-lead⟧</p>"#);
     if rows.is_empty() {
         return b + r#"<p class="mute">⟦attention-none⟧</p>"#;
     }
     b.push_str(r#"<div class="hand">"#);
     for r in rows {
-        let (c, st, by) = (n(r, "count"), s(r, "status"), s(r, "automated_by"));
-        let kind = match st.as_str() {
-            "manual" | "automated" | "deliberate" => st.clone(),
-            _ => "manual".to_string(),
+        let (c, m, e, l, by) = (
+            n(r, "count"),
+            n(r, "minutes"),
+            eff(r),
+            n(r, "load"),
+            s(r, "automated_by"),
+        );
+        let kind = if s(r, "status") == "automated" {
+            "automated"
+        } else {
+            "manual"
         };
-        let sat = kind == "manual" && c >= 3;
+        let sat = kind == "manual" && (c >= 3 || e >= 30);
         let _ = write!(
             b,
-            r#"<div class="hrow{}"><span class="hact">{}{}</span><span class="hbarbox"><span class="hbar {kind}" style="width:{}%"></span></span><b>{c}×</b><span class="chip">⟦hand-status-{kind}⟧{}</span></div>"#,
+            r#"<div class="hrow{}"><span class="hact">{}{}</span><span class="hbarbox"><span class="hbar {kind}" style="width:{}%"></span></span><span class="hnum"><b>{c}×</b> · {m} ⟦minutes⟧ · ⟦hand-load⟧ {l}</span><span class="chip">⟦hand-status-{kind}⟧{}</span></div>"#,
             if sat { " sat" } else { "" },
             esc(&s(r, "action")),
             if sat {
@@ -2225,7 +2249,7 @@ pub fn handwork_html(data: &Data, fam: &[String]) -> String {
             } else {
                 ""
             },
-            (c * 100 / max).max(3),
+            (e * 100 / max).max(3),
             if by.is_empty() {
                 String::new()
             } else {
@@ -2234,6 +2258,108 @@ pub fn handwork_html(data: &Data, fam: &[String]) -> String {
         );
     }
     b + "</div>"
+}
+
+/// The decisions about a step, as small badges: what was chosen, with why and what was rejected on
+/// hover, and how much research and how many sources it rests on.
+fn decided_html(data: &Data, fam: &[String], step: &str) -> String {
+    let ds: Vec<&Row> = of(data, "decisions", fam)
+        .into_iter()
+        .filter(|d| s(d, "about").split(',').any(|a| a.trim() == step))
+        .collect();
+    if ds.is_empty() {
+        return String::new();
+    }
+    let mut b = String::from(r#"<div class="decided">"#);
+    for d in ds {
+        let count = |k: &str| s(d, k).split(',').filter(|x| !x.trim().is_empty()).count();
+        let rests = count("research") + count("sources");
+        let rests = if rests > 0 {
+            format!(r#" <span class="rests">{rests}</span>"#)
+        } else {
+            String::new()
+        };
+        let _ = write!(
+            b,
+            r#"<span class="badge" title="{}">{}{rests}</span>"#,
+            esc(&format!(
+                "{} - ⟦rejected⟧ {}",
+                s(d, "why"),
+                s(d, "rejected")
+            )),
+            esc(&cut(&s(d, "decision"), 60))
+        );
+    }
+    b + "</div>"
+}
+
+/// What a project looked at before acting: each research entry - the question, what was found, and
+/// its sources with what is taken from each - then the sources no entry cites.
+pub fn research_html(data: &Data, fam: &[String]) -> String {
+    let sources = of(data, "sources", fam);
+    let src_html = |r: &Row| {
+        let (url, year) = (s(r, "url"), s(r, "year"));
+        let title = if url.starts_with("https://") {
+            format!(r#"<a href="{}">{}</a>"#, esc(&url), esc(&s(r, "title")))
+        } else {
+            esc(&s(r, "title"))
+        };
+        let year = if year.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", esc(&year))
+        };
+        format!(
+            r#"<li id="s-{}">{title} - {}{year} <span class="mute">{}</span></li>"#,
+            slug(&s(r, "id")),
+            esc(&s(r, "by")),
+            esc(&s(r, "takes"))
+        )
+    };
+    let mut b = String::from(r#"<h1>⟦view-research⟧</h1><p class="lead">⟦research-lead⟧</p>"#);
+    let mut research = of(data, "research", fam);
+    research.sort_by_key(|r| std::cmp::Reverse(s(r, "date")));
+    let mut cited: Vec<String> = Vec::new();
+    for r in &research {
+        let ids: Vec<String> = s(r, "sources")
+            .split(',')
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect();
+        let _ = write!(
+            b,
+            r#"<div class="card research" id="r-{}"><h4>{}</h4><p>{}</p>"#,
+            slug(&s(r, "id")),
+            esc(&s(r, "question")),
+            esc(&s(r, "found"))
+        );
+        let found: Vec<String> = ids
+            .iter()
+            .filter_map(|i| sources.iter().find(|x| s(x, "id") == *i))
+            .map(|x| src_html(x))
+            .collect();
+        if !found.is_empty() {
+            let _ = write!(b, r#"<ul class="sources">{}</ul>"#, found.concat());
+        }
+        let _ = write!(b, r#"<p class="mute">{}</p></div>"#, esc(&s(r, "date")));
+        cited.extend(ids);
+    }
+    let rest: Vec<String> = sources
+        .iter()
+        .filter(|x| !cited.contains(&s(x, "id")))
+        .map(|x| src_html(x))
+        .collect();
+    if !rest.is_empty() {
+        let _ = write!(
+            b,
+            r#"<h2>⟦research-sources⟧</h2><ul class="sources">{}</ul>"#,
+            rest.concat()
+        );
+    }
+    if research.is_empty() && rest.is_empty() {
+        b.push_str(r#"<p class="mute">⟦attention-none⟧</p>"#);
+    }
+    b
 }
 
 /// Where the whole is weakest right now, read from every project's data: what waits on a person,
@@ -2349,40 +2475,36 @@ pub fn attention_html(data: &Data) -> String {
             ));
         }
     }
-    // hand-work worth a tool: manual actions past three, summed across projects, by the time they cost
+    // hand-work worth a tool: manual actions done three times or past 30 effort-minutes, summed across
+    // projects by id, ranked by effort
     let mut sums: Vec<(String, String, i64, i64, Vec<String>)> = Vec::new();
     for r in data
         .rows("handwork")
         .iter()
-        .filter(|r| s(r, "status") == "manual")
+        .filter(|r| s(r, "status") != "automated")
     {
         let (id, c) = (s(r, "id"), n(r, "count"));
+        let e = if n(r, "effort") > 0 {
+            n(r, "effort")
+        } else {
+            c
+        };
         match sums.iter_mut().find(|x| x.0 == id) {
             Some(x) => {
                 x.2 += c;
+                x.3 += e;
                 x.4.push(s(r, "project"));
             }
-            None => sums.push((
-                id,
-                s(r, "action"),
-                c,
-                n(r, "minutes"),
-                vec![s(r, "project")],
-            )),
+            None => sums.push((id, s(r, "action"), c, e, vec![s(r, "project")])),
         }
     }
-    sums.retain(|x| x.2 >= 3);
-    sums.sort_by_key(|x| std::cmp::Reverse(x.2 * x.3.max(1)));
+    sums.retain(|x| x.2 >= 3 || x.3 >= 30);
+    sums.sort_by_key(|x| std::cmp::Reverse(x.3));
     let hand: Vec<String> = sums
         .iter()
-        .map(|(_, a, c, m, ps)| {
-            let cost = if *m > 0 {
-                format!(" · ~{} ⟦minutes⟧", c * m)
-            } else {
-                String::new()
-            };
+        .map(|(_, a, c, e, ps)| {
             format!(
-                "{} · {c}×{cost} · {}",
+                "{} · {c}× · {e} ⟦effort-minutes⟧ · {}",
                 esc(a),
                 ps.iter().map(|p| name(p)).collect::<Vec<_>>().join(", ")
             )
@@ -2512,9 +2634,10 @@ pub fn essence_html(
     for (m, e) in &rated {
         let _ = write!(
             b,
-            r#"<div class="serve"><div class="what"><b>{}</b><span class="chip">⟦state-{}⟧</span></div><div class="by">"#,
+            r#"<div class="serve"><div class="what"><b>{}</b><span class="chip">⟦state-{}⟧</span>{}</div><div class="by">"#,
             esc(&m.title),
-            e.state().replace(' ', "-")
+            e.state().replace(' ', "-"),
+            decided_html(data, fam, &m.id)
         );
         let by: Vec<&&Row> = workings.iter().filter(|w| s(w, "serves") == m.id).collect();
         if by.is_empty() {
@@ -3036,6 +3159,7 @@ mod tests {
             pages.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),
             [
                 "project-tad.html",
+                "project-tad-research.html",
                 "project-tad-hand.html",
                 "project-tad-words.html",
                 "project-tad-idea.html",
@@ -3534,30 +3658,62 @@ mod tests {
     }
 
     #[test]
-    fn hand_work_shows_what_is_saturated_and_what_a_tool_replaced() {
+    fn hand_work_ranks_by_effort_and_an_automated_one_never_asks() {
         let d = data(&[
             ("projects", "{\"id\":\"o/p\",\"name\":\"P\",\"kind\":\"tool\",\"parent\":\"x\"}\n{\"id\":\"o/q\",\"name\":\"Q\",\"kind\":\"tool\",\"parent\":\"x\"}"),
-            ("handwork", "{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":4,\"status\":\"manual\",\"minutes\":3,\"project\":\"o/p\"}\n{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":2,\"status\":\"manual\",\"project\":\"o/q\"}\n{\"id\":\"rows\",\"action\":\"write rows by hand\",\"count\":24,\"status\":\"automated\",\"automated_by\":\"ocoeco note\",\"project\":\"o/p\"}\n{\"id\":\"look\",\"action\":\"look at a page\",\"count\":9,\"status\":\"deliberate\",\"project\":\"o/p\"}"),
+            ("handwork", "{\"id\":\"box\",\"action\":\"carry the heavy box\",\"count\":2,\"minutes\":40,\"load\":9,\"effort\":72,\"status\":\"manual\",\"project\":\"o/p\"}\n{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":4,\"minutes\":12,\"load\":5,\"effort\":12,\"status\":\"manual\",\"project\":\"o/p\"}\n{\"id\":\"patch\",\"action\":\"patch source by text\",\"count\":2,\"minutes\":6,\"load\":5,\"effort\":6,\"status\":\"manual\",\"project\":\"o/q\"}\n{\"id\":\"rows\",\"action\":\"write rows by hand\",\"count\":24,\"effort\":24,\"status\":\"automated\",\"automated_by\":\"ocoeco note\",\"project\":\"o/p\"}"),
         ]);
         let h = handwork_html(&d, &["o/p".to_string()]);
         assert!(
-            h.find("write rows by hand").unwrap() < h.find("patch source by text").unwrap(),
-            "by count"
+            h.find("carry the heavy box").unwrap() < h.find("write rows by hand").unwrap(),
+            "by effort, not count"
         );
         assert_eq!(
             h.matches("hand-worth").count(),
-            1,
-            "only the manual one past three asks for a tool"
+            2,
+            "the heavy box (effort) and the patching (count)"
         );
-        assert!(h.contains("· ocoeco note") && h.contains("hand-status-deliberate"));
+        assert!(h.contains("· ocoeco note") && h.contains("hand-status-automated"));
         let a = attention_html(&d);
         assert!(
-            a.contains("patch source by text · 6×"),
+            a.find("carry the heavy box").unwrap() < a.find("patch source by text").unwrap(),
+            "{a}"
+        );
+        assert!(
+            a.contains("patch source by text · 6× · 18"),
             "summed across projects: {a}"
         );
         assert!(
-            !a.contains("look at a page") && !a.contains("write rows by hand"),
-            "deliberate and automated never ask"
+            !a.contains("write rows by hand"),
+            "an automated one never asks"
+        );
+    }
+
+    #[test]
+    fn a_step_shows_its_decisions_and_research_shows_its_sources() {
+        let d = data(&[
+            ("decisions", "{\"id\":\"d1\",\"decision\":\"Boot the EFI image\",\"why\":\"gzip never started\",\"rejected\":\"sort keys\",\"about\":\"m1, m2\",\"research\":\"r1\",\"sources\":\"s1\",\"project\":\"o/p\"}\n{\"id\":\"d2\",\"decision\":\"Elsewhere\",\"why\":\"w\",\"rejected\":\"\",\"about\":\"m9\",\"project\":\"o/p\"}"),
+            ("research", "{\"id\":\"r1\",\"question\":\"How do bootloaders start a kernel?\",\"found\":\"Only EFI programs.\",\"sources\":\"s1\",\"date\":\"2026-11-11\",\"project\":\"o/p\"}"),
+            ("sources", "{\"id\":\"s1\",\"title\":\"UEFI spec\",\"by\":\"UEFI Forum\",\"year\":2024,\"url\":\"https://uefi.org\",\"takes\":\"what a loader starts\",\"project\":\"o/p\"}\n{\"id\":\"s2\",\"title\":\"Other\",\"by\":\"X\",\"url\":\"\",\"takes\":\"t\",\"project\":\"o/p\"}"),
+        ]);
+        let fam = vec!["o/p".to_string()];
+        let b = decided_html(&d, &fam, "m2");
+        assert!(
+            b.contains("Boot the EFI image")
+                && b.contains(r#"<span class="rests">2</span>"#)
+                && !b.contains("Elsewhere"),
+            "{b}"
+        );
+        assert!(b.contains("gzip never started - ⟦rejected⟧ sort keys"));
+        assert_eq!(decided_html(&d, &fam, "m3"), "");
+        let r = research_html(&d, &fam);
+        assert!(
+            r.contains("How do bootloaders start a kernel?")
+                && r.contains(r#"<a href="https://uefi.org">UEFI spec</a> - UEFI Forum, 2024"#)
+        );
+        assert!(
+            r.find("research-sources").unwrap() < r.find("Other").unwrap(),
+            "an uncited source is listed apart"
         );
     }
 }
