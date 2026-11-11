@@ -93,5 +93,8 @@ card-features-work = features known to work on
 card-partly = partly
 card-missing = missing
 card-to-measure = still to measure
-card-projects = projects
 card-readiness = readiness
+card-projects = { $count ->
+    [one] { $count } project
+   *[other] { $count } projects
+}

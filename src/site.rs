@@ -1100,12 +1100,12 @@ fn grand_overview_card(data: &Data, g: &Grand) -> String {
         path_view(&rated)
     };
     format!(
-        r#"<a class="grand" href="{}/index.html"><h3>{}</h3><p>{}</p>{path}<p>{}{} ⟦card-projects⟧</p></a>"#,
+        r#"<a class="grand" href="{}/index.html"><h3>{}</h3><p>{}</p>{path}<p>{}{}</p></a>"#,
         g.slug,
         esc(&g.title),
         esc(&g.goal),
         esc(&line),
-        fam.len()
+        esc(&crate::i18n::tn("card-projects", fam.len() as i64))
     )
 }
 
@@ -3112,7 +3112,10 @@ mod tests {
             lens: Value::Null,
         };
         let card = grand_overview_card(&d, &g);
-        assert_eq!(card.matches("⟦card-projects⟧").count(), 1, "{card}");
+        assert!(
+            card.contains("<p>1 project</p>"),
+            "counted once, in the form its number asks for: {card}"
+        );
         assert!(
             !card.contains(" projects<"),
             "no English word outside the catalog: {card}"
